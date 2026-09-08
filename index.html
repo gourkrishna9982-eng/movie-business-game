@@ -9089,6 +9089,7 @@ async function driveSaveGameState(state) {
     return true;
   } catch (err) {
     console.warn('Google Drive save failed:', err);
+    setDriveStatus('Connected • save failed — tap Connect to retry', '#ffb4b4');
     return false;
   }
 }
@@ -9180,25 +9181,23 @@ async function persistGameState() {
   try {
     const snapshot = JSON.parse(JSON.stringify(gameState));
     saveLocalGameState(currentUserEmail, snapshot); // always keep a local backup too
-    const response = await fetchWithTimeout(API_BASE_URL + '/api/save', {
+
+    // Keep the existing server save and Google Drive as independent copies.
+    // They run in parallel so a slow/asleep server cannot delay the Drive save.
+    const serverSavePromise = fetchWithTimeout(API_BASE_URL + '/api/save', {
       method: 'POST',
-      // text/plain avoids a CORS preflight (see /api/login for details);
-      // server.js parses the raw body as JSON regardless of Content-Type,
-      // so this has no effect on the request contract.
       headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({ email: currentUserEmail, gameState: snapshot })
+    }).then(response => {
+      if (response.ok) hasServerSave = true;
+      return response;
+    }).catch(err => {
+      console.warn('Server save failed:', err);
+      return null;
     });
-    if (response.ok) hasServerSave = true;
 
-    // If Google Drive has been connected, keep a second independent cloud
-    // copy in the user's appDataFolder. Server/local saving still happens
-    // exactly as before, so Drive is additive rather than replacing them.
-    await driveSaveGameState(snapshot);
-  } catch (err) {
-    // Server unreachable — the local backup above already ran, so play
-    // continues offline. Deliberately silent: this is an expected,
-    // recoverable condition, not something that should surface to the
-    // player as an on-screen error.
+    const driveSavePromise = driveSaveGameState(snapshot);
+    await Promise.allSettled([serverSavePromise, driveSavePromise]);
   } finally {
     saveInFlight = false;
     if (saveQueuedWhileInFlight) {
