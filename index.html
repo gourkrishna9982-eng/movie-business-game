@@ -6248,6 +6248,10 @@ function confirmMultipleSim() {
     for(let i=0; i<weeks; i++) {
         simulateOneWeek();
     }
+    // Make a checkpoint immediately after a multi-week simulation instead of
+    // relying only on the 900ms debounce.
+    scheduleSave();
+    persistGameState();
     closeSimModal();
 }
 
@@ -8979,7 +8983,13 @@ async function connectGoogleDrive() {
       setDriveStatus('Connected • cloud save found ✓', '#6ee7b7');
     } else {
       hasDriveSave = false;
-      setDriveStatus('Connected • no cloud save yet', '#6ee7b7');
+      setDriveStatus('Connected • ready for cloud save', '#6ee7b7');
+      // Only create a Drive save when a real game session is already active.
+      // On the home screen, Continue must first load the newest server/local
+      // save instead of accidentally uploading a fresh Week 1 state.
+      if (currentUserEmail && document.getElementById('gameRoot')?.classList.contains('active')) {
+        await driveSaveGameState(JSON.parse(JSON.stringify(gameState)));
+      }
     }
   } catch (err) {
     console.warn('Google Drive connection failed:', err);
@@ -9003,12 +9013,28 @@ async function driveApi(url, options = {}) {
   return response;
 }
 
+async function driveError(response, action) {
+  let detail = '';
+  try {
+    const raw = await response.text();
+    if (raw) {
+      try {
+        const data = JSON.parse(raw);
+        detail = data?.error?.message || data?.error?.errors?.[0]?.reason || raw;
+      } catch (_) {
+        detail = raw;
+      }
+    }
+  } catch (_) {}
+  return new Error(action + ' (' + response.status + ')' + (detail ? ': ' + detail : '.'));
+}
+
 async function driveFindSaveFile() {
   const q = "'appDataFolder' in parents and name='" + DRIVE_SAVE_FILENAME + "' and trashed=false";
   const url = 'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
     '&spaces=appDataFolder&fields=files(id,name,modifiedTime)&pageSize=10';
   const response = await driveApi(url);
-  if (!response.ok) throw new Error('Drive file lookup failed (' + response.status + ').');
+  if (!response.ok) throw await driveError(response, 'Drive file lookup failed');
   const result = await response.json();
   const file = (result.files || [])[0] || null;
   googleDriveFileId = file ? file.id : null;
@@ -9021,8 +9047,12 @@ async function driveLoadGameState() {
   const file = await driveFindSaveFile();
   if (!file) return null;
   const response = await driveApi('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(file.id) + '?alt=media');
-  if (!response.ok) throw new Error('Drive save download failed (' + response.status + ').');
+  if (!response.ok) throw await driveError(response, 'Drive save download failed');
   const state = await response.json();
+  if (state && typeof state === 'object') {
+    if (!state._saveMeta) state._saveMeta = {};
+    if (!state._saveMeta.savedAt && file.modifiedTime) state._saveMeta.savedAt = file.modifiedTime;
+  }
   return state && typeof state === 'object' ? state : null;
 }
 
@@ -9051,7 +9081,7 @@ async function driveCreateSave(state) {
       body: multipart
     }
   );
-  if (!response.ok) throw new Error('Drive save create failed (' + response.status + ').');
+  if (!response.ok) throw await driveError(response, 'Drive save create failed');
   const file = await response.json();
   googleDriveFileId = file.id;
   hasDriveSave = true;
@@ -9069,12 +9099,11 @@ async function driveUpdateSave(state) {
     }
   );
   if (!response.ok) {
-    // File may have been deleted elsewhere. Re-discover it and create/update.
     if (response.status === 404) {
       googleDriveFileId = null;
       return driveCreateSave(state);
     }
-    throw new Error('Drive save update failed (' + response.status + ').');
+    throw await driveError(response, 'Drive save update failed');
   }
   hasDriveSave = true;
   return response;
@@ -9089,11 +9118,10 @@ async function driveSaveGameState(state) {
     return true;
   } catch (err) {
     console.warn('Google Drive save failed:', err);
-    setDriveStatus('Connected • save failed — tap Connect to retry', '#ffb4b4');
+    setDriveStatus('Connected • save failed — ' + (err.message || 'unknown error'), '#ffb4b4');
     return false;
   }
 }
-
 
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -9180,10 +9208,15 @@ async function persistGameState() {
   saveInFlight = true;
   try {
     const snapshot = JSON.parse(JSON.stringify(gameState));
+    snapshot._saveMeta = Object.assign({}, snapshot._saveMeta || {}, {
+      savedAt: new Date().toISOString(),
+      email: currentUserEmail
+    });
     saveLocalGameState(currentUserEmail, snapshot); // always keep a local backup too
 
-    // Keep the existing server save and Google Drive as independent copies.
-    // They run in parallel so a slow/asleep server cannot delay the Drive save.
+    // Server and Google Drive are independent copies. Do NOT wait for the
+    // server before starting Drive; a sleeping/slow server must never prevent
+    // the Drive copy from being written.
     const serverSavePromise = fetchWithTimeout(API_BASE_URL + '/api/save', {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
@@ -9192,12 +9225,14 @@ async function persistGameState() {
       if (response.ok) hasServerSave = true;
       return response;
     }).catch(err => {
-      console.warn('Server save failed:', err);
+      console.warn('Save failed (server unreachable):', err);
       return null;
     });
 
     const driveSavePromise = driveSaveGameState(snapshot);
     await Promise.allSettled([serverSavePromise, driveSavePromise]);
+  } catch (err) {
+    console.warn('Save preparation failed:', err);
   } finally {
     saveInFlight = false;
     if (saveQueuedWhileInFlight) {
@@ -9351,51 +9386,62 @@ function goNewStudio() {
   showScreen('createStudioScreen');
 }
 
+function saveTimestamp(state) {
+  const t = state && state._saveMeta && state._saveMeta.savedAt;
+  const n = t ? Date.parse(t) : 0;
+  return Number.isFinite(n) ? n : 0;
+}
+
 async function goContinue() {
   if (!currentUserEmail) return;
 
-  // 1) If Drive is connected, prefer the player's Google Drive save.
+  // Collect every available copy. The newest valid save wins, so an older
+  // server copy can never overwrite a newer local/Drive copy.
+  const candidates = [];
+
   if (googleDriveAccessToken) {
     try {
       const driveState = await driveLoadGameState();
       if (driveState) {
         hasDriveSave = true;
-        enterGame(driveState);
-        return;
+        candidates.push({ source: 'Google Drive', state: driveState });
       }
     } catch (err) {
-      console.warn('Drive load failed, trying server/local fallback:', err);
+      console.warn('Drive load failed:', err);
     }
   }
 
-  // 2) Existing server save remains the primary fallback.
   try {
     const response = await fetchWithTimeout(API_BASE_URL + '/api/load', {
       method: 'POST',
-      // text/plain avoids a CORS preflight (see /api/login for details);
-      // server.js parses the raw body as JSON regardless of Content-Type,
-      // so this has no effect on the request contract.
       headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({ email: currentUserEmail })
     });
     const result = await response.json();
-    if (response.ok && result.hasSave) {
+    if (response.ok && result.hasSave && result.gameState) {
       hasServerSave = true;
-      enterGame(result.gameState);
-      return;
+      candidates.push({ source: 'Server', state: result.gameState });
     }
   } catch (err) {
-    console.warn('Server load failed, trying local/Drive fallback:', err);
+    console.warn('Server load failed:', err);
   }
 
-  // 3) Existing localStorage backup remains the final fallback.
   const localState = loadLocalGameState(currentUserEmail);
-  if (localState) {
-    enterGame(localState);
+  if (localState) candidates.push({ source: 'This device', state: localState });
+
+  if (!candidates.length) {
+    alert('No saved studio yet for this account. Create a NEW STUDIO first.');
     return;
   }
 
-  alert('No saved studio yet for this account. Create a NEW STUDIO first.');
+  candidates.sort((a, b) => saveTimestamp(b.state) - saveTimestamp(a.state));
+  const winner = candidates[0];
+  console.log('Continue loaded newest save:', winner.source, winner.state?._saveMeta?.savedAt || 'legacy save');
+  enterGame(winner.state);
+
+  // Immediately replicate the winning save to all currently connected stores,
+  // making the selected state the new common checkpoint.
+  setTimeout(() => persistGameState(), 50);
 }
 
 function goExit() {
