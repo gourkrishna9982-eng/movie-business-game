@@ -883,6 +883,7 @@ body {
 .global-bo-progress-fill { width: 0%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #d4a017, #ffd54a); transition: width 0.35s ease; }
 
 </style>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
@@ -921,6 +922,13 @@ body {
     <button class="menu-btn btn-exit" onclick="goExit()">
       <span class="icon">🚪</span> EXIT
     </button>
+
+    <div style="margin-top:16px;text-align:center;">
+      <button type="button" onclick="connectGoogleDrive()" style="padding:11px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#fff;font-weight:700;cursor:pointer;">
+        ☁️ CONNECT GOOGLE DRIVE
+      </button>
+      <div id="driveStatus" style="margin-top:8px;font-size:12px;color:#9aa4b2;">Google Drive: Not connected</div>
+    </div>
   </div>
 </div>
 
@@ -8901,35 +8909,209 @@ let saveDebounceTimer = null;
 let saveInFlight = false;
 let saveQueuedWhileInFlight = false;
 
+// Google Drive cloud-save layer. The OAuth client ID is safe to expose in a
+// browser app; NEVER put the OAuth client secret in this file.
+const GOOGLE_CLIENT_ID = '92954333195-07rkr9urs5pmbbtp6mdf2bp9t7a6romm.apps.googleusercontent.com';
+const DRIVE_APPDATA_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+const DRIVE_SAVE_FILENAME = 'movie-business-save.json';
+let googleDriveAccessToken = null;
+let googleDriveTokenClient = null;
+let googleDriveFileId = null;
+let hasDriveSave = false;
+let driveConnectPromise = null;
+
+function setDriveStatus(text, color) {
+  const el = document.getElementById('driveStatus');
+  if (!el) return;
+  el.textContent = 'Google Drive: ' + text;
+  if (color) el.style.color = color;
+}
+
+function initGoogleDriveTokenClient() {
+  if (googleDriveTokenClient) return googleDriveTokenClient;
+  if (!window.google || !google.accounts || !google.accounts.oauth2) return null;
+  googleDriveTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: DRIVE_APPDATA_SCOPE,
+    callback: () => {}
+  });
+  return googleDriveTokenClient;
+}
+
+function requestGoogleDriveAccess() {
+  if (googleDriveAccessToken) return Promise.resolve(googleDriveAccessToken);
+  if (driveConnectPromise) return driveConnectPromise;
+
+  driveConnectPromise = new Promise((resolve, reject) => {
+    const client = initGoogleDriveTokenClient();
+    if (!client) {
+      reject(new Error('Google Identity Services is not loaded yet. Please wait a moment and try again.'));
+      driveConnectPromise = null;
+      return;
+    }
+    client.callback = (response) => {
+      driveConnectPromise = null;
+      if (response && response.access_token) {
+        googleDriveAccessToken = response.access_token;
+        setDriveStatus('Connected ✓', '#6ee7b7');
+        resolve(googleDriveAccessToken);
+      } else {
+        reject(new Error((response && response.error_description) || 'Google Drive authorization was cancelled.'));
+      }
+    };
+    try {
+      client.requestAccessToken({ prompt: 'consent' });
+    } catch (err) {
+      driveConnectPromise = null;
+      reject(err);
+    }
+  });
+  return driveConnectPromise;
+}
+
+async function connectGoogleDrive() {
+  try {
+    setDriveStatus('Connecting…', '#f0d98c');
+    await requestGoogleDriveAccess();
+    const driveState = await driveLoadGameState();
+    if (driveState) {
+      hasDriveSave = true;
+      setDriveStatus('Connected • cloud save found ✓', '#6ee7b7');
+    } else {
+      hasDriveSave = false;
+      setDriveStatus('Connected • no cloud save yet', '#6ee7b7');
+    }
+  } catch (err) {
+    console.warn('Google Drive connection failed:', err);
+    setDriveStatus('Not connected', '#ff8a8a');
+    alert('Google Drive connect failed: ' + (err.message || 'Unknown error'));
+  }
+}
+
+async function driveApi(url, options = {}) {
+  if (!googleDriveAccessToken) throw new Error('Google Drive is not connected.');
+  const headers = Object.assign({}, options.headers || {}, {
+    Authorization: 'Bearer ' + googleDriveAccessToken
+  });
+  const response = await fetchWithTimeout(url, Object.assign({}, options, { headers }));
+  if (response.status === 401) {
+    googleDriveAccessToken = null;
+    googleDriveFileId = null;
+    hasDriveSave = false;
+    setDriveStatus('Authorization expired — reconnect required', '#f0d98c');
+  }
+  return response;
+}
+
+async function driveFindSaveFile() {
+  const q = "'appDataFolder' in parents and name='" + DRIVE_SAVE_FILENAME + "' and trashed=false";
+  const url = 'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
+    '&spaces=appDataFolder&fields=files(id,name,modifiedTime)&pageSize=10';
+  const response = await driveApi(url);
+  if (!response.ok) throw new Error('Drive file lookup failed (' + response.status + ').');
+  const result = await response.json();
+  const file = (result.files || [])[0] || null;
+  googleDriveFileId = file ? file.id : null;
+  hasDriveSave = !!file;
+  return file;
+}
+
+async function driveLoadGameState() {
+  if (!googleDriveAccessToken) return null;
+  const file = await driveFindSaveFile();
+  if (!file) return null;
+  const response = await driveApi('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(file.id) + '?alt=media');
+  if (!response.ok) throw new Error('Drive save download failed (' + response.status + ').');
+  const state = await response.json();
+  return state && typeof state === 'object' ? state : null;
+}
+
+async function driveCreateSave(state) {
+  const boundary = '-------movieBusinessDriveBoundary' + Date.now();
+  const metadata = {
+    name: DRIVE_SAVE_FILENAME,
+    parents: ['appDataFolder'],
+    mimeType: 'application/json'
+  };
+  const body = JSON.stringify(state);
+  const multipart =
+    '--' + boundary + '\r\n' +
+    'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+    JSON.stringify(metadata) + '\r\n' +
+    '--' + boundary + '\r\n' +
+    'Content-Type: application/json\r\n\r\n' +
+    body + '\r\n' +
+    '--' + boundary + '--';
+
+  const response = await driveApi(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'multipart/related; boundary=' + boundary },
+      body: multipart
+    }
+  );
+  if (!response.ok) throw new Error('Drive save create failed (' + response.status + ').');
+  const file = await response.json();
+  googleDriveFileId = file.id;
+  hasDriveSave = true;
+  return file;
+}
+
+async function driveUpdateSave(state) {
+  if (!googleDriveFileId) return driveCreateSave(state);
+  const response = await driveApi(
+    'https://www.googleapis.com/upload/drive/v3/files/' + encodeURIComponent(googleDriveFileId) + '?uploadType=media',
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state)
+    }
+  );
+  if (!response.ok) {
+    // File may have been deleted elsewhere. Re-discover it and create/update.
+    if (response.status === 404) {
+      googleDriveFileId = null;
+      return driveCreateSave(state);
+    }
+    throw new Error('Drive save update failed (' + response.status + ').');
+  }
+  hasDriveSave = true;
+  return response;
+}
+
+async function driveSaveGameState(state) {
+  if (!googleDriveAccessToken) return false;
+  try {
+    if (!googleDriveFileId) await driveFindSaveFile();
+    await driveUpdateSave(state);
+    setDriveStatus('Connected • saved ✓', '#6ee7b7');
+    return true;
+  } catch (err) {
+    console.warn('Google Drive save failed:', err);
+    return false;
+  }
+}
+
+
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
 }
 
 /* ---------- Local fallback save ----------
-   PRIMARY save is always the server (/api/save, /api/load). This local copy
-   exists ONLY as a backup so play is never blocked when the server is
-   unreachable, and so in-progress offline changes are never lost. It is
-   never treated as the source of truth while the server is reachable and
-   has a save — see goContinue() for the exact precedence rules. */
-function localSaveKey(email) { return 'mb3_save_' + String(email || '').trim().toLowerCase(); }
+   Used ONLY when the remote save server cannot be reached. The server is
+   always tried first, on every login/continue/save; this is purely a
+   backup so play is not blocked when the server is unreachable. Nothing
+   about the existing server-based save system is removed or replaced. */
+function localSaveKey(email) { return 'mb3_save_' + String(email || '').toLowerCase(); }
 function saveLocalGameState(email, state) {
-  try {
-    const payload = { gameState: state, updatedAt: new Date().toISOString() };
-    localStorage.setItem(localSaveKey(email), JSON.stringify(payload));
-  } catch (e) { /* storage unavailable — offline backup simply unavailable */ }
+  try { localStorage.setItem(localSaveKey(email), JSON.stringify(state)); } catch (e) { /* storage unavailable */ }
 }
 function loadLocalGameState(email) {
   try {
     const raw = localStorage.getItem(localSaveKey(email));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    // Back-compat: an earlier version of this backup stored the raw
-    // gameState object directly, with no {gameState, updatedAt} wrapper.
-    if (parsed && typeof parsed === 'object' && 'gameState' in parsed && 'updatedAt' in parsed) {
-      return parsed;
-    }
-    return { gameState: parsed, updatedAt: null };
+    return raw ? JSON.parse(raw) : null;
   } catch (e) { return null; }
 }
 
@@ -8993,18 +9175,11 @@ gameState = makeReactive(gameState, scheduleSave);
 
 async function persistGameState() {
   if (!currentUserEmail) return;
-
-  // Always capture + write the local backup FIRST and unconditionally —
-  // even if a previous server save is still in flight. Previously this
-  // write only happened after the in-flight check, so a debounced save
-  // that arrived while an earlier request was still pending would return
-  // immediately and skip updating the local backup, leaving it stale.
-  const snapshot = JSON.parse(JSON.stringify(gameState));
-  saveLocalGameState(currentUserEmail, snapshot);
-
   if (saveInFlight) { saveQueuedWhileInFlight = true; return; }
   saveInFlight = true;
   try {
+    const snapshot = JSON.parse(JSON.stringify(gameState));
+    saveLocalGameState(currentUserEmail, snapshot); // always keep a local backup too
     const response = await fetchWithTimeout(API_BASE_URL + '/api/save', {
       method: 'POST',
       // text/plain avoids a CORS preflight (see /api/login for details);
@@ -9014,6 +9189,11 @@ async function persistGameState() {
       body: JSON.stringify({ email: currentUserEmail, gameState: snapshot })
     });
     if (response.ok) hasServerSave = true;
+
+    // If Google Drive has been connected, keep a second independent cloud
+    // copy in the user's appDataFolder. Server/local saving still happens
+    // exactly as before, so Drive is additive rather than replacing them.
+    await driveSaveGameState(snapshot);
   } catch (err) {
     // Server unreachable — the local backup above already ran, so play
     // continues offline. Deliberately silent: this is an expected,
@@ -9038,10 +9218,6 @@ window.addEventListener('beforeunload', () => { if (currentUserEmail) flushSaveN
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && currentUserEmail) flushSaveNow();
 });
-// When the connection comes back after being offline, push the latest
-// in-memory state (which already reflects everything played offline) to
-// the server right away, instead of waiting for the next state change.
-window.addEventListener('online', () => { if (currentUserEmail) flushSaveNow(); });
 
 /* ---------- hand a loaded/created save to the existing game engine ---------- */
 function enterGame(loadedGameState) {
@@ -9139,6 +9315,8 @@ async function handleLogin() {
 
     currentUserEmail = email.toLowerCase();
     hasServerSave = !!result.hasSave;
+    hasDriveSave = false;
+    setDriveStatus(googleDriveAccessToken ? 'Connected ✓' : 'Not connected', googleDriveAccessToken ? '#6ee7b7' : '#9aa4b2');
     document.getElementById('userEmail').textContent = currentUserEmail;
 
     errorMsg.textContent = '';
@@ -9150,8 +9328,9 @@ async function handleLogin() {
     // save for this account. The server is still tried first on every
     // login; this only kicks in when that request fails outright.
     currentUserEmail = email.toLowerCase();
-    const offlineSave = loadLocalGameState(currentUserEmail);
-    hasServerSave = !!(offlineSave && offlineSave.gameState);
+    hasServerSave = !!loadLocalGameState(currentUserEmail);
+    hasDriveSave = false;
+    setDriveStatus(googleDriveAccessToken ? 'Connected ✓' : 'Not connected', googleDriveAccessToken ? '#6ee7b7' : '#9aa4b2');
     document.getElementById('userEmail').textContent = currentUserEmail;
     errorMsg.style.color = '#f0a93a';
     errorMsg.textContent = 'Could not reach the save server — continuing in offline mode.';
@@ -9166,8 +9345,8 @@ document.getElementById('emailInput').addEventListener('keydown', function (e) {
 
 /* ---------- Home screen actions ---------- */
 function goNewStudio() {
-  if (hasServerSave) {
-    const ok = confirm('This will start a new studio and replace your current game progress. Continue?');
+  if (hasServerSave || hasDriveSave || !!loadLocalGameState(currentUserEmail)) {
+    const ok = confirm('This will start a new studio and replace your current game progress, including cloud/local saves. Continue?');
     if (!ok) return;
   }
   showScreen('createStudioScreen');
@@ -9175,8 +9354,22 @@ function goNewStudio() {
 
 async function goContinue() {
   if (!currentUserEmail) return;
-  const localSave = loadLocalGameState(currentUserEmail); // { gameState, updatedAt } | null
 
+  // 1) If Drive is connected, prefer the player's Google Drive save.
+  if (googleDriveAccessToken) {
+    try {
+      const driveState = await driveLoadGameState();
+      if (driveState) {
+        hasDriveSave = true;
+        enterGame(driveState);
+        return;
+      }
+    } catch (err) {
+      console.warn('Drive load failed, trying server/local fallback:', err);
+    }
+  }
+
+  // 2) Existing server save remains the primary fallback.
   try {
     const response = await fetchWithTimeout(API_BASE_URL + '/api/load', {
       method: 'POST',
@@ -9187,49 +9380,31 @@ async function goContinue() {
       body: JSON.stringify({ email: currentUserEmail })
     });
     const result = await response.json();
-
-    if (response.ok && result.hasSave && result.gameState) {
-      // Cloud save exists and is normally treated as the source of truth.
-      // If the backend also returns updatedAt, and the local backup is
-      // strictly newer (e.g. changes made while offline haven't synced
-      // yet), prefer the newer local copy instead of silently discarding
-      // that progress. If the backend doesn't send updatedAt, this check
-      // is skipped and the cloud save is used, same as before.
+    if (response.ok && result.hasSave) {
       hasServerSave = true;
-      if (localSave && localSave.updatedAt && result.updatedAt &&
-          new Date(localSave.updatedAt) > new Date(result.updatedAt)) {
-        enterGame(localSave.gameState);
-      } else {
-        enterGame(result.gameState);
-      }
+      enterGame(result.gameState);
       return;
     }
-
-    // Server reachable, but it has no save for this account. That doesn't
-    // necessarily mean there's no progress to resume — check the local
-    // backup before telling the player there's nothing to continue.
-    if (localSave && localSave.gameState) {
-      hasServerSave = false; // cloud has nothing yet; next save will create it
-      enterGame(localSave.gameState);
-      return;
-    }
-
-    alert('No saved studio yet for this account. Create a NEW STUDIO first.');
   } catch (err) {
-    // Remote server unreachable — fall back to the local save for this
-    // account, if one exists, so play can continue offline.
-    if (localSave && localSave.gameState) {
-      enterGame(localSave.gameState);
-    } else {
-      alert('Could not reach the save server, and no offline save was found for this account. Check your connection and try again.');
-    }
+    console.warn('Server load failed, trying local/Drive fallback:', err);
   }
+
+  // 3) Existing localStorage backup remains the final fallback.
+  const localState = loadLocalGameState(currentUserEmail);
+  if (localState) {
+    enterGame(localState);
+    return;
+  }
+
+  alert('No saved studio yet for this account. Create a NEW STUDIO first.');
 }
 
 function goExit() {
   if (currentUserEmail) flushSaveNow();
   currentUserEmail = null;
   hasServerSave = false;
+  hasDriveSave = false;
+  setDriveStatus(googleDriveAccessToken ? 'Connected ✓' : 'Not connected', googleDriveAccessToken ? '#6ee7b7' : '#9aa4b2');
   document.getElementById('emailInput').value = '';
   document.getElementById('errorMsg').textContent = '';
   showScreen('loginScreen');
@@ -9736,7 +9911,6 @@ function simulateOneWeek() {
     simulateOneWeekCore();
     processRandomIndustryEvent();
     renderIndustryEventsView();
-    flushSaveNow(); // ensure time/calendar advance is saved immediately, not just debounced
 }
 
 function renderIndustryEventsView() {
