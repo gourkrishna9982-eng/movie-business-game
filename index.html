@@ -9017,6 +9017,34 @@ async function manualSaveToGoogleDrive() {
     if (!googleDriveAccessToken) {
       await requestGoogleDriveAccess();
     }
+
+    // IMPORTANT: The Home screen does not contain the player's loaded game.
+    // gameState there is still the fresh/default Week 1 state. Never let the
+    // Home-screen SAVE TO DRIVE button overwrite a real Week 22 (or later)
+    // cloud save with that default state.
+    const gameIsActive = document.getElementById('gameRoot')?.classList.contains('active');
+    if (!gameIsActive) {
+      const existingDrive = await driveLoadGameState();
+      if (existingDrive) {
+        hasDriveSave = true;
+        setDriveStatus('Connected • cloud save safe ✓', '#6ee7b7');
+        alert('Cloud save already exists. Press CONTINUE to load your latest progress.');
+        return;
+      }
+
+      // If there is no cloud save yet, use the existing same-device checkpoint
+      // rather than the fresh Week 1 gameState.
+      const localState = loadLocalGameState(currentUserEmail);
+      if (!localState) {
+        alert('No existing game progress found. Create a NEW STUDIO first.');
+        return;
+      }
+      const ok = await driveSaveGameState(localState);
+      if (!ok) throw new Error('Drive save did not complete.');
+      setDriveStatus('Connected • saved ✓', '#6ee7b7');
+      return;
+    }
+
     const snapshot = JSON.parse(JSON.stringify(gameState));
     snapshot._saveMeta = Object.assign({}, snapshot._saveMeta || {}, {
       savedAt: new Date().toISOString(),
