@@ -927,6 +927,9 @@ body {
       <button type="button" onclick="connectGoogleDrive()" style="padding:11px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#fff;font-weight:700;cursor:pointer;">
         ☁️ CONNECT GOOGLE DRIVE
       </button>
+      <button type="button" onclick="manualSaveToGoogleDrive()" style="margin-left:6px;padding:11px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(110,231,183,.08);color:#6ee7b7;font-weight:700;cursor:pointer;">
+        💾 SAVE TO DRIVE
+      </button>
       <div id="driveStatus" style="margin-top:8px;font-size:12px;color:#9aa4b2;">Google Drive: Not connected</div>
     </div>
   </div>
@@ -8880,17 +8883,9 @@ document.addEventListener("DOMContentLoaded", () => {
         EXISTING gameState object + EXISTING render functions
    =========================================================== */
 
-// ⚠️ REQUIRED: set this to your VPS's public address (not localhost — the
-// browser opening this HTML file is on YOUR device, so "localhost" would
-// mean your own device, not the VPS). Example: 'http://203.0.113.45:3000'
-// or, if you have a domain + HTTPS: 'https://yourdomain.com'
-// ⚠️ SET THIS to your VPS's public address, e.g.:
-//   'http://203.0.113.45:3000'          (plain IP, no domain/HTTPS yet)
-//   'https://yourdomain.com'            (if frontend+backend share this origin)
-// Do NOT leave this pointing at Render — Render's filesystem is ephemeral
-// and is why the previous save data disappeared.
-// Live backend: Render web service, backed by Supabase PostgreSQL.
-const API_BASE_URL = 'https://movie-business-server.onrender.com';
+// The old Render/VPS save API is no longer required. Google Drive is the
+// primary cloud save, with localStorage as a same-device fallback.
+const API_BASE_URL = '';
 
 // Any request to the save server gets a hard timeout. Without this, a
 // server that is asleep (cold start) or simply unreachable can leave
@@ -8977,24 +8972,63 @@ async function connectGoogleDrive() {
   try {
     setDriveStatus('Connecting…', '#f0d98c');
     await requestGoogleDriveAccess();
+
     const driveState = await driveLoadGameState();
     if (driveState) {
       hasDriveSave = true;
       setDriveStatus('Connected • cloud save found ✓', '#6ee7b7');
+      return;
+    }
+
+    // No Drive file yet. If this account already has a local save, upload that
+    // exact checkpoint instead of creating a fresh Week 1 save. This makes
+    // connecting Drive after playing safe, while keeping Drive as the cloud
+    // source of truth.
+    let seedState = null;
+    if (currentUserEmail) {
+      seedState = loadLocalGameState(currentUserEmail);
+    }
+    if (!seedState && currentUserEmail && document.getElementById('gameRoot')?.classList.contains('active')) {
+      seedState = JSON.parse(JSON.stringify(gameState));
+    }
+
+    if (seedState) {
+      const ok = await driveSaveGameState(seedState);
+      if (ok) {
+        setDriveStatus('Connected • cloud save created ✓', '#6ee7b7');
+      }
     } else {
       hasDriveSave = false;
       setDriveStatus('Connected • ready for cloud save', '#6ee7b7');
-      // Only create a Drive save when a real game session is already active.
-      // On the home screen, Continue must first load the newest server/local
-      // save instead of accidentally uploading a fresh Week 1 state.
-      if (currentUserEmail && document.getElementById('gameRoot')?.classList.contains('active')) {
-        await driveSaveGameState(JSON.parse(JSON.stringify(gameState)));
-      }
     }
   } catch (err) {
     console.warn('Google Drive connection failed:', err);
     setDriveStatus('Not connected', '#ff8a8a');
     alert('Google Drive connect failed: ' + (err.message || 'Unknown error'));
+  }
+}
+
+async function manualSaveToGoogleDrive() {
+  if (!currentUserEmail) {
+    alert('Please login first.');
+    return;
+  }
+  try {
+    if (!googleDriveAccessToken) {
+      await requestGoogleDriveAccess();
+    }
+    const snapshot = JSON.parse(JSON.stringify(gameState));
+    snapshot._saveMeta = Object.assign({}, snapshot._saveMeta || {}, {
+      savedAt: new Date().toISOString(),
+      email: currentUserEmail
+    });
+    saveLocalGameState(currentUserEmail, snapshot);
+    const ok = await driveSaveGameState(snapshot);
+    if (!ok) throw new Error('Drive save did not complete.');
+    setDriveStatus('Connected • saved ✓', '#6ee7b7');
+  } catch (err) {
+    console.warn('Manual Google Drive save failed:', err);
+    alert('Google Drive save failed: ' + (err.message || 'Unknown error'));
   }
 }
 
@@ -9129,10 +9163,8 @@ function showScreen(id) {
 }
 
 /* ---------- Local fallback save ----------
-   Used ONLY when the remote save server cannot be reached. The server is
-   always tried first, on every login/continue/save; this is purely a
-   backup so play is not blocked when the server is unreachable. Nothing
-   about the existing server-based save system is removed or replaced. */
+   Used only as a same-device backup when Google Drive is not connected or
+   temporarily unavailable. Google Drive remains the primary cloud save. */
 function localSaveKey(email) { return 'mb3_save_' + String(email || '').toLowerCase(); }
 function saveLocalGameState(email, state) {
   try { localStorage.setItem(localSaveKey(email), JSON.stringify(state)); } catch (e) { /* storage unavailable */ }
@@ -9212,25 +9244,13 @@ async function persistGameState() {
       savedAt: new Date().toISOString(),
       email: currentUserEmail
     });
-    saveLocalGameState(currentUserEmail, snapshot); // always keep a local backup too
 
-    // Server and Google Drive are independent copies. Do NOT wait for the
-    // server before starting Drive; a sleeping/slow server must never prevent
-    // the Drive copy from being written.
-    const serverSavePromise = fetchWithTimeout(API_BASE_URL + '/api/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ email: currentUserEmail, gameState: snapshot })
-    }).then(response => {
-      if (response.ok) hasServerSave = true;
-      return response;
-    }).catch(err => {
-      console.warn('Save failed (server unreachable):', err);
-      return null;
-    });
-
-    const driveSavePromise = driveSaveGameState(snapshot);
-    await Promise.allSettled([serverSavePromise, driveSavePromise]);
+    // Google Drive is the primary cloud save. localStorage remains only as a
+    // same-device safety backup. No VPS/Render/database is required for save.
+    saveLocalGameState(currentUserEmail, snapshot);
+    if (googleDriveAccessToken) {
+      await driveSaveGameState(snapshot);
+    }
   } catch (err) {
     console.warn('Save preparation failed:', err);
   } finally {
@@ -9322,55 +9342,14 @@ async function handleLogin() {
     return;
   }
 
-  errorMsg.style.color = '#c7cdd6';
-  errorMsg.textContent = 'Logging in...';
-  loginBtn.disabled = true;
-
-  try {
-    const response = await fetchWithTimeout(API_BASE_URL + '/api/login', {
-      method: 'POST',
-      // NOTE: sent as text/plain (not application/json) so the browser
-      // treats this as a CORS "simple request" and skips the OPTIONS
-      // preflight — which is what was failing when this file is opened via
-      // file://. The body content is still plain JSON; server.js already
-      // parses the raw body as JSON regardless of Content-Type, so this has
-      // no effect on the request/response contract.
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ email })
-    });
-    const result = await response.json();
-
-    if (!response.ok) {
-      errorMsg.style.color = '#ff6b6b';
-      errorMsg.textContent = result.error || 'Login failed. Try again.';
-      loginBtn.disabled = false;
-      return;
-    }
-
-    currentUserEmail = email.toLowerCase();
-    hasServerSave = !!result.hasSave;
-    hasDriveSave = false;
-    setDriveStatus(googleDriveAccessToken ? 'Connected ✓' : 'Not connected', googleDriveAccessToken ? '#6ee7b7' : '#9aa4b2');
-    document.getElementById('userEmail').textContent = currentUserEmail;
-
-    errorMsg.textContent = '';
-    loginBtn.disabled = false;
-    showScreen('homeScreen');
-
-  } catch (err) {
-    // Remote server unreachable — fall back to offline mode using any local
-    // save for this account. The server is still tried first on every
-    // login; this only kicks in when that request fails outright.
-    currentUserEmail = email.toLowerCase();
-    hasServerSave = !!loadLocalGameState(currentUserEmail);
-    hasDriveSave = false;
-    setDriveStatus(googleDriveAccessToken ? 'Connected ✓' : 'Not connected', googleDriveAccessToken ? '#6ee7b7' : '#9aa4b2');
-    document.getElementById('userEmail').textContent = currentUserEmail;
-    errorMsg.style.color = '#f0a93a';
-    errorMsg.textContent = 'Could not reach the save server — continuing in offline mode.';
-    loginBtn.disabled = false;
-    showScreen('homeScreen');
-  }
+  currentUserEmail = email.toLowerCase();
+  hasServerSave = !!loadLocalGameState(currentUserEmail);
+  hasDriveSave = false;
+  setDriveStatus(googleDriveAccessToken ? 'Connected ✓' : 'Not connected', googleDriveAccessToken ? '#6ee7b7' : '#9aa4b2');
+  document.getElementById('userEmail').textContent = currentUserEmail;
+  errorMsg.textContent = '';
+  loginBtn.disabled = false;
+  showScreen('homeScreen');
 }
 
 document.getElementById('emailInput').addEventListener('keydown', function (e) {
@@ -9395,52 +9374,32 @@ function saveTimestamp(state) {
 async function goContinue() {
   if (!currentUserEmail) return;
 
-  // Collect every available copy. The newest valid save wins, so an older
-  // server copy can never overwrite a newer local/Drive copy.
-  const candidates = [];
-
+  // Google Drive is the authoritative cross-device save. Local storage is
+  // only a fallback for this device when Drive is not connected/unavailable.
+  let driveState = null;
   if (googleDriveAccessToken) {
     try {
-      const driveState = await driveLoadGameState();
-      if (driveState) {
-        hasDriveSave = true;
-        candidates.push({ source: 'Google Drive', state: driveState });
-      }
+      driveState = await driveLoadGameState();
+      if (driveState) hasDriveSave = true;
     } catch (err) {
       console.warn('Drive load failed:', err);
+      setDriveStatus('Connected • load failed — ' + (err.message || 'unknown error'), '#ffb4b4');
     }
-  }
-
-  try {
-    const response = await fetchWithTimeout(API_BASE_URL + '/api/load', {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ email: currentUserEmail })
-    });
-    const result = await response.json();
-    if (response.ok && result.hasSave && result.gameState) {
-      hasServerSave = true;
-      candidates.push({ source: 'Server', state: result.gameState });
-    }
-  } catch (err) {
-    console.warn('Server load failed:', err);
   }
 
   const localState = loadLocalGameState(currentUserEmail);
-  if (localState) candidates.push({ source: 'This device', state: localState });
+  const winner = driveState || localState;
 
-  if (!candidates.length) {
-    alert('No saved studio yet for this account. Create a NEW STUDIO first.');
+  if (!winner) {
+    alert(googleDriveAccessToken
+      ? 'No saved studio found for this Google Drive account. Create a NEW STUDIO first.'
+      : 'No local save found. Connect Google Drive and create a NEW STUDIO first.');
     return;
   }
 
-  candidates.sort((a, b) => saveTimestamp(b.state) - saveTimestamp(a.state));
-  const winner = candidates[0];
-  console.log('Continue loaded newest save:', winner.source, winner.state?._saveMeta?.savedAt || 'legacy save');
-  enterGame(winner.state);
-
-  // Immediately replicate the winning save to all currently connected stores,
-  // making the selected state the new common checkpoint.
+  enterGame(winner);
+  // Refresh the Drive checkpoint immediately after loading it, while keeping
+  // the exact loaded state and timestamp as the starting point.
   setTimeout(() => persistGameState(), 50);
 }
 
@@ -9511,7 +9470,7 @@ function handleCreateStudio() {
   };
 
   gameState = makeReactive(freshState, scheduleSave);
-  hasServerSave = true;
+  hasServerSave = true; // retained for existing UI logic; actual save is Drive/local
   flushSaveNow();     // save immediately so the new studio is never lost
   enterGame(null);    // gameState already set above
 }
