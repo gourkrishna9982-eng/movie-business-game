@@ -1819,17 +1819,6 @@ body {
 
         <div class="db-import-row">
             <div>
-                <h4>Singers Database</h4>
-                <p id="singersCountLabel">Loaded: 0 records</p>
-            </div>
-            <label class="btn-import-file">
-                <i class="fa-solid fa-upload"></i> Load JSON
-                <input type="file" accept=".json" style="display:none;" onchange="loadCustomJSON('singers', this)">
-            </label>
-        </div>
-
-        <div class="db-import-row">
-            <div>
                 <h4>VFX Studios Database</h4>
                 <p id="vfxCountLabel">Loaded: 20 records</p>
             </div>
@@ -3736,9 +3725,6 @@ let EMBEDDED_ACTRESSES_DATA = ACTRESSES_TUPLES.map(t => ({
   starPower: t[12], salary: t[13], experience: t[14], fanBase: t[15], status: t[16], gender: "Female"
 }));
 
-/* SOURCE DATA FOR SINGERS (DEDICATED JSON DATABASE) */
-let EMBEDDED_SINGERS_DATA = [];
-
 /* SOURCE DATA FOR VFX STUDIOS (INITIAL FALLBACK TUPLES) */
 const VFX_TUPLES = [
   [1,"Industrial Light & Magic (ILM)","United States","San Francisco","Global",["VFX","CGI","Creature FX","Virtual Production","Environment FX"],98,99,96,88,96,99,12.5,30,180.0,"Available"],
@@ -3952,17 +3938,6 @@ function parseSalaryToNumber(sal) {
     return cleaned ? parseFloat(cleaned) : 0;
 }
 
-function normalizeSingerJSONRecord(item,index){
-    const src=item&&typeof item==='object'?item:{};
-    const feeKeys=['singerFee','musicArtistFee','musicFee','artistFee','singingFee','playbackFee','musicContractFee','artistContractFee','musicValue','fee','salary'];
-    let fee=0;
-    for(const k of feeKeys){const raw=src[k];const v=(typeof raw==='number')?raw:parseSalaryToNumber(raw);if(Number.isFinite(v)&&v>=0){fee=v;break;}}
-    const appealKeys=['musicStarPower','musicStarpower','singingStarPower','singerStarPower','musicAppeal','singingAbility','vocalAbility','musicPopularity','singerPopularity','starPower','overallRating','rating'];
-    let appeal=50;
-    for(const k of appealKeys){const v=Number(src[k]);if(Number.isFinite(v)){appeal=Math.max(0,Math.min(100,v));break;}}
-    return {...src,id:src.id!=null?src.id:`singer_${index+1}`,name:src.name||src.artistName||src.singerName||`Singer ${index+1}`,singerFee:fee,musicStarPower:appeal,status:src.status||'Available',languages:Array.isArray(src.languages)?src.languages:(src.languages?[src.languages]:[])};
-}
-
 /* ==========================================================================
    JSON FILE IMPORT SYSTEM FUNCTION
    ========================================================================== */
@@ -3997,10 +3972,6 @@ function loadCustomJSON(type, inputElement) {
                 populateActorFilters();
                 renderActorsTable();
                 alert(`Successfully loaded ${data.length} Female Actresses from ${file.name}`);
-            } else if(type === 'singers') {
-                EMBEDDED_SINGERS_DATA = data.map((item, index) => normalizeSingerJSONRecord(item, index));
-                if(window.renderSongRelease) window.renderSongRelease();
-                alert(`Successfully loaded ${data.length} Singers from ${file.name}`);
             } else if(type === 'vfx') {
                 EMBEDDED_VFX_DATA = data;
                 populateVFXFilters();
@@ -4021,7 +3992,6 @@ function updateDatabaseCountsUI() {
         document.getElementById('directorsCountLabel').innerText = `Loaded: ${EMBEDDED_DIRECTORS_DATA.length} records`;
         document.getElementById('actorsCountLabel').innerText = `Loaded: ${EMBEDDED_ACTORS_DATA.length} records`;
         document.getElementById('actressesCountLabel').innerText = `Loaded: ${EMBEDDED_ACTRESSES_DATA.length} records`;
-        if(document.getElementById('singersCountLabel')) document.getElementById('singersCountLabel').innerText = `Loaded: ${EMBEDDED_SINGERS_DATA.length} records`;
         document.getElementById('vfxCountLabel').innerText = `Loaded: ${EMBEDDED_VFX_DATA.length} records`;
     }
 }
@@ -5204,49 +5174,158 @@ function territoryTalentAffinity(talent, territory, roleWeight = 1) {
     const contribution = recognition * value * marketAffinity;
     return Math.max(0.35, Math.min(2.35, 0.72 + (contribution - 0.72) * Math.max(0.35, roleWeight)));
 }
+function movieTalentMetric(value, fallback = 55) {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : fallback;
+}
+function movieExperienceScore(value) {
+    const years = Number.parseFloat(String(value || '').replace(/[^0-9.]/g, ''));
+    if (!Number.isFinite(years)) return 55;
+    return Math.max(45, Math.min(90, 50 + years * 1.15));
+}
+function movieFanBaseScore(value) {
+    const millions = Number.parseFloat(String(value || '').replace(/[^0-9.]/g, ''));
+    if (!Number.isFinite(millions)) return 55;
+    return Math.max(35, Math.min(96, 45 + 55 * (1 - Math.exp(-millions / 55))));
+}
+function movieWriterQuality(movie) {
+    const w = movie && movie.writer;
+    if (!w) return 52;
+    const core =
+        movieTalentMetric(w.story) * 0.34 +
+        movieTalentMetric(w.screenplay) * 0.34 +
+        movieTalentMetric(w.dialogue) * 0.17 +
+        movieTalentMetric(w.creativity) * 0.15;
+    const calibrated = core * 0.86 + movieTalentMetric(w.overallRating) * 0.09 + movieExperienceScore(w.experience) * 0.05;
+    return Math.max(25, Math.min(98, calibrated));
+}
+function movieDirectorQuality(movie) {
+    const d = movie && movie.director;
+    if (!d) return 52;
+    const core =
+        movieTalentMetric(d.direction) * 0.34 +
+        movieTalentMetric(d.vision) * 0.30 +
+        movieTalentMetric(d.creativity) * 0.20 +
+        movieTalentMetric(d.leadership) * 0.16;
+    const calibrated = core * 0.86 + movieTalentMetric(d.overallRating) * 0.09 + movieExperienceScore(d.experience) * 0.05;
+    return Math.max(25, Math.min(98, calibrated));
+}
+function movieCastQuality(movie) {
+    const cast = territoryAllCast(movie);
+    if (!cast.length) return 52;
+    let weightedDelta = 0;
+    const genres = movie && movie.genres || [];
+    const ranked = cast.slice().sort((a,b)=>(b.roleWeight||0)-(a.roleWeight||0));
+    ranked.forEach((item, index) => {
+        const t = item.talent;
+        const base =
+            movieTalentMetric(t.acting) * 0.36 +
+            movieTalentMetric(t.screenPresence) * 0.28 +
+            movieTalentMetric(t.dialogue) * 0.20 +
+            movieTalentMetric(t.versatility) * 0.16;
+        let genreSkill = null;
+        if (genres.includes('Action')) genreSkill = movieTalentMetric(t.action);
+        else if (genres.includes('Comedy')) genreSkill = movieTalentMetric(t.comedy);
+        const quality = genreSkill == null ? base : base * 0.84 + genreSkill * 0.16;
+        const diminishing = index === 0 ? 1 : Math.max(0.28, 0.72 / (index + 0.2));
+        weightedDelta += (quality - 52) * (item.roleWeight || 0.3) * diminishing;
+    });
+    return Math.max(25, Math.min(98, 52 + weightedDelta));
+}
+function movieVfxSpecializationFit(movie) {
+    const v = movie && movie.vfx;
+    if (!v) return 0.50;
+    const specs = Array.isArray(v.specialization) ? v.specialization.map(x => territoryNameKey(x)) : [];
+    const genres = movie && movie.genres || [];
+    const required = new Set();
+    if (genres.some(g => ['Action','Sci-Fi','Fantasy','Adventure','War'].includes(g))) {
+        ['vfx','cgi','simulation','virtualproduction','environmentfx','actionvfx','destructionfx'].forEach(x => required.add(x));
+    }
+    if (genres.includes('Fantasy')) ['creaturefx','characteranimation'].forEach(x => required.add(x));
+    if (genres.includes('Sci-Fi')) ['digitalhumans','virtualproduction'].forEach(x => required.add(x));
+    if (!required.size) return 0.50;
+    const matches = specs.filter(x => required.has(x)).length;
+    return Math.max(0.35, Math.min(1, 0.55 + Math.min(0.45, matches * 0.11)));
+}
+function movieVfxQuality(movie) {
+    const v = movie && movie.vfx;
+    if (!v) return 52;
+    const heavy = (movie.genres || []).some(g => ['Sci-Fi','Fantasy','Action','Adventure','War'].includes(g));
+    const fit = movieVfxSpecializationFit(movie);
+    const core = movieTalentMetric(v.quality) * 0.48 + movieTalentMetric(v.technology) * 0.28 + movieTalentMetric(v.creativity) * 0.24;
+    const calibrated = core * 0.90 + movieTalentMetric(v.overallRating) * 0.07 + movieTalentMetric(v.reputation) * 0.03;
+    if (!heavy) return Math.max(48, Math.min(82, 58 + (calibrated - 58) * 0.22));
+    return Math.max(25, Math.min(98, calibrated * (0.72 + fit * 0.28)));
+}
+function moviePerformanceQuality(movie) {
+    const writer = movieWriterQuality(movie);
+    const director = movieDirectorQuality(movie);
+    const cast = movieCastQuality(movie);
+    const vfx = movieVfxQuality(movie);
+    const genres = movie && movie.genres || [];
+    const vfxWeight = genres.some(g => ['Sci-Fi','Fantasy','Action','Adventure','War'].includes(g)) ? 0.10 : 0.035;
+    const coreWeight = 1 - vfxWeight;
+    const core = writer * 0.32 + director * 0.32 + cast * 0.36;
+    return Math.max(20, Math.min(98, core * coreWeight + vfx * vfxWeight));
+}
+function movieOpeningStarPull(movie) {
+    const cast = territoryAllCast(movie);
+    let castPull = 45;
+    const openingWeights = {hero:1.00, heroine:0.86, villain:0.60, supporting:0.30, cameo:0.12};
+    cast.slice().sort((a,b)=>(openingWeights[b.role]||0.2)-(openingWeights[a.role]||0.2)).forEach((item, index) => {
+        const t = item.talent;
+        const role = openingWeights[item.role] || 0.20;
+        const star = movieTalentMetric(t.starPower);
+        const fan = movieFanBaseScore(t.fanBase);
+        const presence = movieTalentMetric(t.screenPresence);
+        const pull = star * 0.62 + fan * 0.26 + presence * 0.12;
+        const diminishing = index === 0 ? 1 : Math.max(0.25, 0.68 / (index + 0.35));
+        castPull += (pull - 45) * role * diminishing;
+    });
+    castPull = Math.max(20, Math.min(100, castPull));
+    const writerPull = movie.writer ? movieTalentMetric(movie.writer.starPower) * 0.08 + movieFanBaseScore(movie.writer.fanBase) * 0.04 : 0;
+    const directorPull = movie.director ? movieTalentMetric(movie.director.starPower) * 0.10 + movieFanBaseScore(movie.director.fanBase) * 0.06 : 0;
+    const hasPeople = !!(cast.length || movie.writer || movie.director);
+    return Math.max(20, Math.min(100, castPull * 0.76 + writerPull + directorPull + (hasPeople ? 0 : 12)));
+}
 function territoryCastMarketPower(movie, territory) {
     const cast = territoryAllCast(movie);
-    if (!cast.length) return 0.72;
-
-    // A major star matters much more than a minor supporting actor. The
-    // ensemble curve deliberately uses diminishing returns rather than a
-    // simple actor count.
+    if (!cast.length) return 0.55;
     const contributions = cast.map(item => {
         const t = item.talent;
         const star = territoryRegionalStarPower(t, territory) / 100;
-        const market = Math.max(0.45, Math.min(2.5, territoryMarketValue(t) / 100));
         const affinity = territoryTalentAffinity(t, territory, item.roleWeight);
-        const importance = Math.pow(Math.max(0.2, item.roleWeight), 0.78);
-        return Math.max(0.08, Math.pow(star, 1.35) * 0.58 + Math.pow(market, 1.10) * 0.22 + (affinity - 0.72) * 0.48) * importance;
+        const importance = Math.pow(Math.max(0.2, item.roleWeight), 0.82);
+        const quality = (
+            movieTalentMetric(t.acting) * 0.34 +
+            movieTalentMetric(t.screenPresence) * 0.27 +
+            movieTalentMetric(t.dialogue) * 0.19 +
+            movieTalentMetric(t.versatility) * 0.20
+        ) / 100;
+        const pull = Math.pow(star, 1.35) * 0.58 + quality * 0.25 + Math.max(0, affinity - 0.72) * 0.42;
+        return Math.max(0.06, pull) * importance;
     }).sort((a,b)=>b-a);
-
     const diminishing = [1.00,0.68,0.50,0.38,0.30,0.25,0.21,0.18];
     let effective = 0;
-    contributions.forEach((value, i) => {
-        effective += value * (diminishing[i] || 0.16);
-    });
-
-    // Ensemble recognition: several genuinely major stars create an event
-    // effect, but the logarithmic curve prevents 5 stars from becoming 5×.
-    const majorStars = cast.filter(item => {
-        const t = item.talent;
-        return territoryRegionalStarPower(t, territory) >= 78 || territoryMarketValue(t) >= 85;
-    }).length;
-    const ensembleBonus = 1 + Math.min(0.48, Math.log1p(majorStars) * 0.12);
+    contributions.forEach((value, i) => { effective += value * (diminishing[i] || 0.16); });
+    const majorStars = cast.filter(item => territoryRegionalStarPower(item.talent, territory) >= 78).length;
+    const ensembleBonus = 1 + Math.min(0.30, Math.log1p(majorStars) * 0.08);
     const leadPresence = contributions.slice(0,3).reduce((a,b)=>a+b,0);
-    return Math.max(0.42, Math.min(3.20, (0.62 + effective * 0.72 + leadPresence * 0.12) * ensembleBonus));
+    return Math.max(0.35, Math.min(2.75, (0.48 + effective * 0.70 + leadPresence * 0.10) * ensembleBonus));
 }
 function territoryDirectorWriterFactor(movie, territory) {
     const people = [movie && movie.director, movie && movie.writer].filter(Boolean);
-    if (!people.length) return 1;
+    if (!people.length) return 0.88;
     const vals = people.map(p => {
         const industry = territoryIndustryKey(p.industry);
         const nationality = territoryNationalityKey(p.nationality);
         const meta = territoryCountryProfile(territory);
         const i = Number(meta && meta.industryAffinity && meta.industryAffinity[industry] || 1);
-        const n = Number(meta && meta.nationalityAffinity && meta.nationalityAffinity[nationality] || 1);
-        const star = Math.max(0, Math.min(100, Number(p.starPower || p.overallRating || 60))) / 100;
-        return 0.55 + star * 0.20 + i * 0.12 + n * 0.13;
+        const nat = Number(meta && meta.nationalityAffinity && meta.nationalityAffinity[nationality] || 1);
+        const quality = p === movie.director ? movieDirectorQuality(movie) : movieWriterQuality(movie);
+        const star = movieTalentMetric(p.starPower);
+        const recognition = 0.45 + star / 100 * 0.20;
+        return Math.max(0.55, Math.min(1.55, 0.48 + quality / 100 * 0.34 + recognition * 0.08 + i * 0.05 + nat * 0.05));
     });
     return vals.reduce((a,b)=>a+b,0) / vals.length;
 }
@@ -5726,8 +5805,7 @@ function calculateScriptDetailsAndQuality(m) {
         const countryName = row.cells[1].innerText.trim();
         releaseCountries.push(countryName);
     });
-    // Do not auto-add a release market. An empty Country Release selection
-    // must remain an empty release so movie collection is exactly 0.
+    if (releaseCountries.length === 0) releaseCountries.push("USA");
 
     // Preserve the Production Setup country-release selection AND the exact
     // release budget paid for each selected country. This becomes the source
@@ -7560,325 +7638,114 @@ function findOttOption(key) {
    ================================================================== */
 function calculateCriticsRating(m) {
     if (!m) return 5.0;
-    
-    let base = (m.scriptQuality || 50) / 10;
-    
-    let writerEffect = 0;
-    if (m.writer) {
-        let storySkill = m.writer.story || 80;
-        let screenplaySkill = m.writer.screenplay || 80;
-        let dialogueSkill = m.writer.dialogue || 80;
-        let creativitySkill = m.writer.creativity || 80;
-        let avgSkill = (storySkill + screenplaySkill + dialogueSkill + creativitySkill) / 4;
-        
-        writerEffect = (avgSkill - 80) * 0.08;
-        if (m.writer.industry === m.industry) {
-            writerEffect += 0.2;
-        }
-    } else {
-        writerEffect = -1.5;
-    }
-    
-    let directorEffect = 0;
-    if (m.director) {
-        let dirSkill = m.director.direction || 80;
-        let visionSkill = m.director.vision || 80;
-        let creativitySkill = m.director.creativity || 80;
-        let avgSkill = (dirSkill + visionSkill + creativitySkill) / 3;
-        
-        directorEffect = (avgSkill - 80) * 0.1;
-        
-        if (m.director.direction >= 94 && m.genres.includes("Action")) {
-            directorEffect += 0.3;
-        }
-        if (m.director.vision >= 94 && m.genres.includes("Drama")) {
-            directorEffect += 0.3;
-        }
-    } else {
-        directorEffect = -2.0;
-    }
-    
-    let castEffect = 0;
-    let castOverallSum = 0;
-    let castCount = 0;
-    ['hero', 'heroine', 'villain'].forEach(role => {
-        if (m.cast && m.cast[role]) {
-            m.cast[role].forEach(t => {
-                castOverallSum += t.acting || 80;
-                castCount++;
-            });
-        }
-    });
-    if (castCount > 0) {
-        let avgCastActing = castOverallSum / castCount;
-        castEffect = (avgCastActing - 80) * 0.05;
-    }
-    
-    let vfxEffect = 0;
-    const isVfxHeavy = m.genres.some(g => ["Sci-Fi", "Fantasy", "Action", "Adventure", "War"].includes(g));
-    if (isVfxHeavy) {
-        if (m.vfx) {
-            let vfxQuality = m.vfx.quality || 80;
-            if (vfxQuality >= 90) {
-                vfxEffect = 0.5;
-            } else if (vfxQuality < 80) {
-                vfxEffect = -1.5;
-            }
-        } else {
-            vfxEffect = -2.0;
-        }
-    }
-    
-    let coherenceBonus = ((m.coherence || 60) - 60) * 0.04;
-    let rating = base + writerEffect + directorEffect + castEffect + vfxEffect + coherenceBonus;
-    
-    let variance = -0.3 + Math.random() * 0.6;
-    rating += variance;
-    
-    return parseFloat(Math.min(10.0, Math.max(1.0, rating)).toFixed(1));
+    const story = movieTalentMetric(m.scriptQuality);
+    const writer = movieWriterQuality(m);
+    const director = movieDirectorQuality(m);
+    const cast = movieCastQuality(m);
+    const vfx = movieVfxQuality(m);
+    const coherence = movieTalentMetric(m.coherence);
+    const fit = movieVfxSpecializationFit(m);
+    const vfxHeavy = (m.genres || []).some(g => ['Sci-Fi','Fantasy','Action','Adventure','War'].includes(g));
+    const technicalWeight = vfxHeavy ? 0.10 : 0.035;
+    const core = story * 0.22 + writer * 0.30 + director * 0.27 + cast * 0.16 + coherence * 0.05;
+    const quality = core * (1 - technicalWeight) + vfx * technicalWeight * (0.72 + fit * 0.28);
+    const variance = (Math.random() - 0.5) * 0.28;
+    return Number(Math.max(1, Math.min(10, quality / 10 + variance)).toFixed(1));
 }
 
 function calculateAudienceRating(m) {
     if (!m) return 5.0;
-    
-    let base = (m.criticsRating * 0.5) + (((m.scriptQuality || 50) / 10) * 0.3);
-    
-    let starEffect = 0;
-    let starSum = 0;
-    let presenceSum = 0;
-    let starCount = 0;
-    ['hero', 'heroine', 'villain'].forEach(role => {
-        if (m.cast && m.cast[role]) {
-            m.cast[role].forEach(t => {
-                starSum += t.starPower || 80;
-                presenceSum += t.screenPresence || 80;
-                starCount++;
-            });
-        }
-    });
-    if (starCount > 0) {
-        let avgStar = starSum / starCount;
-        let avgPresence = presenceSum / starCount;
-        starEffect = (((avgStar + avgPresence) / 2) - 80) * 0.06;
+    const writer = movieWriterQuality(m);
+    const director = movieDirectorQuality(m);
+    const cast = movieCastQuality(m);
+    const vfx = movieVfxQuality(m);
+    const story = movieTalentMetric(m.scriptQuality);
+    const coherence = movieTalentMetric(m.coherence);
+    const genres = m.genres || [];
+    const vfxHeavy = genres.some(g => ['Sci-Fi','Fantasy','Action','Adventure','War'].includes(g));
+    const vfxWeight = vfxHeavy ? 0.09 : 0.025;
+    let entertainment = story * 0.24 + writer * 0.25 + director * 0.20 + cast * 0.26 + coherence * 0.05;
+    if (genres.includes('Action')) {
+        const action = territoryAllCast(m).reduce((s,x)=>s + movieTalentMetric(x.talent.action) * x.roleWeight, 0) / Math.max(0.01, territoryAllCast(m).reduce((s,x)=>s + x.roleWeight, 0));
+        entertainment = entertainment * 0.88 + action * 0.12;
+    } else if (genres.includes('Comedy')) {
+        const comedy = territoryAllCast(m).reduce((s,x)=>s + movieTalentMetric(x.talent.comedy) * x.roleWeight, 0) / Math.max(0.01, territoryAllCast(m).reduce((s,x)=>s + x.roleWeight, 0));
+        entertainment = entertainment * 0.88 + comedy * 0.12;
     }
-    
-    let talentBonus = 0;
-    if (m.genres.includes("Action")) {
-        let actionSum = 0;
-        let actionCount = 0;
-        ['hero', 'villain'].forEach(role => {
-            if (m.cast && m.cast[role]) {
-                m.cast[role].forEach(t => {
-                    actionSum += t.action || 80;
-                    actionCount++;
-                });
-            }
-        });
-        if (actionCount > 0 && (actionSum / actionCount) >= 90) talentBonus += 0.5;
-    }
-    if (m.genres.includes("Comedy")) {
-        let comedySum = 0;
-        let comedyCount = 0;
-        ['hero', 'supporting'].forEach(role => {
-            if (m.cast && m.cast[role]) {
-                m.cast[role].forEach(t => {
-                    comedySum += t.comedy || 80;
-                    comedyCount++;
-                });
-            }
-        });
-        if (comedyCount > 0 && (comedySum / comedyCount) >= 90) talentBonus += 0.5;
-    }
-    
     let endingBonus = 0;
-    if (m.ending === "Happy Ending" || m.ending === "Everyone Survives") {
-        if (m.genres.some(g => ["Comedy", "Romance", "Family"].includes(g))) endingBonus += 0.6;
-        else endingBonus += 0.2;
-    } else if (m.ending === "Sad Ending" || m.ending === "Hero Sacrifice" || m.ending === "Bittersweet") {
-        if (m.genres.some(g => ["Drama", "War", "Historical", "Biography"].includes(g))) endingBonus += 0.6;
-        else endingBonus -= 0.5;
-    } else if (m.ending === "Cliffhanger" || m.ending === "Sequel Setup") {
-        endingBonus += 0.4;
-    }
-    
-    let pacingBonus = 0;
-    if (m.storySynergy && m.storySynergy.includes("Mismatch")) {
-        pacingBonus = -1.2;
-    } else if (m.storySynergy && m.storySynergy.includes("Synergy")) {
-        pacingBonus = 0.6;
-    }
-    
-    let songBonus = 0;
-    if (m.genres.includes("Romance") && m.songType === "Romantic" && m.songCount >= 3) {
-        songBonus = 0.5;
-    } else if (m.genres.includes("Drama") && m.songType === "Emotional" && m.songCount >= 2) {
-        songBonus = 0.5;
-    }
-    
-    let vfxBonus = 0;
-    const isVfxHeavy = m.genres.some(g => ["Sci-Fi", "Fantasy", "Action", "Adventure", "War"].includes(g));
-    if (isVfxHeavy && m.vfx) {
-        let vfxQuality = m.vfx.quality || 80;
-        if (vfxQuality >= 92) {
-            vfxBonus = 0.8;
-        } else if (vfxQuality < 80) {
-            vfxBonus = -0.8;
-        }
-    }
-    
-    let rating = base + starEffect + talentBonus + endingBonus + pacingBonus + songBonus + vfxBonus;
-    let variance = -0.3 + Math.random() * 0.6;
-    rating += variance;
-    
-    return parseFloat(Math.min(10.0, Math.max(1.0, rating)).toFixed(1));
+    if (m.ending === 'Happy Ending' || m.ending === 'Everyone Survives') endingBonus = genres.some(g => ['Comedy','Romance','Family'].includes(g)) ? 4 : 1;
+    else if (m.ending === 'Sad Ending' || m.ending === 'Hero Sacrifice' || m.ending === 'Bittersweet') endingBonus = genres.some(g => ['Drama','War','Historical','Biography'].includes(g)) ? 4 : -4;
+    else if (m.ending === 'Cliffhanger' || m.ending === 'Sequel Setup') endingBonus = 2;
+    if (m.storySynergy && m.storySynergy.includes('Mismatch')) endingBonus -= 7;
+    else if (m.storySynergy && m.storySynergy.includes('Synergy')) endingBonus += 4;
+    if (genres.includes('Romance') && m.songType === 'Romantic' && m.songCount >= 3) endingBonus += 3;
+    if (genres.includes('Drama') && m.songType === 'Emotional' && m.songCount >= 2) endingBonus += 3;
+    const quality = entertainment * (1 - vfxWeight) + vfx * vfxWeight * (0.72 + movieVfxSpecializationFit(m) * 0.28) + endingBonus;
+    const variance = (Math.random() - 0.5) * 0.28;
+    return Number(Math.max(1, Math.min(10, quality / 10 + variance)).toFixed(1));
 }
 
 function calculateInitialPopularity(m) {
     if (!m) return 30;
-    
-    let base = 30;
-    
-    let starHype = 80;
-    let starSum = 0;
-    let starCount = 0;
-    ['hero', 'heroine'].forEach(role => {
-        if (m.cast && m.cast[role]) {
-            m.cast[role].forEach(t => {
-                starSum += t.starPower || 80;
-                starCount++;
-            });
-        }
-    });
-    if (starCount > 0) {
-        starHype = starSum / starCount;
-    }
-    base += (starHype - 50) * 0.5;
-    
-    if (m.cameoCount >= 1 && m.cast && m.cast.cameo && m.cast.cameo.length > 0) {
-        let maxCameoStar = Math.max(...m.cast.cameo.map(c => c.starPower || 0));
-        if (maxCameoStar >= 90) {
-            base += 8;
-        }
-    }
-    
-    if (m.franchiseName && m.franchiseName.trim() !== '') {
-        base += 12;
-    }
-    
-    if (m.movieScript === 'Remake') {
-        base += 5;
-    }
-    
-    let mktSpend = m.marketingTotal || 0;
-    let mktBonus = 0;
-    if (m.marketingConfirmedLevel === 'worldwide') mktBonus += 15;
-    else if (m.marketingConfirmedLevel === 'country') mktBonus += 8;
-    else if (m.marketingConfirmedLevel === 'small') mktBonus += 3;
-    
-    mktBonus += Math.min(12, mktSpend * 0.08);
-    base += mktBonus;
-    
-    let genreMult = getGenreTrendMultiplier(m.genres);
-    base += (genreMult - 1.0) * 15;
-    
-    let releaseWeek = m.releaseDate ? m.releaseDate.week : gameState.currentWeek;
-    const festEntry = getSeasonalMarketEntry(releaseWeek, m);
-    if (festEntry && festEntry.applicable && festEntry.multiplier > 1) {
-        base += 8;
-    }
-    
-    let countriesBonus = Math.min(12, (m.releaseCountries ? m.releaseCountries.length : 1) * 1.2);
-    let dubbingBonus = Math.min(8, (m.dubbingLanguages ? m.dubbingLanguages.length : 0) * 1.5);
-    base += countriesBonus + dubbingBonus;
-    
-    let pop = Math.min(100, Math.max(10, Math.round(base)));
-    
-    const ar = m.audienceRating || 6.0;
-    if (ar >= 8.5) m.wordOfMouth = "Outstanding";
-    else if (ar >= 7.0) m.wordOfMouth = "Positive";
-    else if (ar >= 5.5) m.wordOfMouth = "Mixed";
-    else m.wordOfMouth = "Terrible";
-    
-    return pop;
+    const star = movieOpeningStarPull(m);
+    const writer = movieWriterQuality(m);
+    const director = movieDirectorQuality(m);
+    const quality = moviePerformanceQuality(m);
+    const franchise = (m.franchiseName && String(m.franchiseName).trim() !== '') ? 8 : 0;
+    const remake = m.movieScript === 'Remake' ? 4 : 0;
+    const marketing = m.marketingConfirmedLevel === 'worldwide' ? 12 : m.marketingConfirmedLevel === 'country' ? 7 : m.marketingConfirmedLevel === 'small' ? 3 : 0;
+    const hype = Number.isFinite(Number(m.hypeScore)) ? Number(m.hypeScore) : 50;
+    const trend = typeof getGenreTrendMultiplier === 'function' ? getGenreTrendMultiplier(m.genres || []) : 1;
+    const festival = m.releaseDate && typeof getSeasonalMarketEntry === 'function' ? getSeasonalMarketEntry(m.releaseDate.week, m) : null;
+    let pop = 20 + star * 0.34 + writer * 0.10 + director * 0.10 + quality * 0.18 + hype * 0.12 + marketing * 0.30 + franchise + remake + (trend - 1) * 12;
+    if (festival && festival.applicable && festival.multiplier > 1) pop += 5;
+    // Release count is intentionally NOT a quality multiplier. Country Release is access only.
+    return Math.min(100, Math.max(10, Math.round(pop)));
 }
 
 function calculateOpeningWeekendCollection(m) {
-    // Country Release is a hard gate. A movie with no selected release market
-    // cannot generate opening collection anywhere.
+    // Country Release is the hard access gate. No selected territory means no theatrical collection.
     if (!m) return 0;
     const countries = Array.isArray(m.releaseCountries) ? m.releaseCountries : [];
     if (!countries.length) return 0;
-    
+
     const baselinePotential = {
-        "USA": 120,
-        "China": 110,
-        "India": 90,
-        "Japan": 70,
-        "South Korea": 60,
-        "United Kingdom": 55,
-        "Germany": 50,
-        "France": 50,
-        "Canada": 45,
-        "Australia": 40,
-        "Brazil": 40,
-        "Mexico": 35,
-        "Russia": 35,
-        "Spain": 30,
-        "Italy": 30,
-        "Indonesia": 25,
-        "Turkey": 25,
-        "Thailand": 20,
-        "UAE": 20,
-        "Malaysia": 15
+        'USA':120,'China':110,'India':90,'Japan':70,'South Korea':60,'United Kingdom':55,
+        'Germany':50,'France':50,'Canada':45,'Australia':40,'Brazil':40,'Mexico':35,
+        'Russia':35,'Spain':30,'Italy':30,'Indonesia':25,'Turkey':25,'Thailand':20,
+        'UAE':20,'Malaysia':15
     };
-    
-    const localLanguages = {
-        "USA": "english",
-        "China": "chinese",
-        "India": "hindi",
-        "Japan": "english",
-        "South Korea": "korean",
-        "United Kingdom": "english",
-        "Germany": "english",
-        "France": "french",
-        "Canada": "english",
-        "Australia": "english",
-        "Brazil": "english",
-        "Mexico": "english",
-        "Russia": "russian",
-        "Spain": "english",
-        "Italy": "english",
-        "Indonesia": "english",
-        "Turkey": "english",
-        "Thailand": "english",
-        "UAE": "english",
-        "Malaysia": "english"
-    };
-
     let totalPotentialMarket = 0;
-
     countries.forEach(c => {
-        // Only explicitly released countries enter opening potential. Language
-        // is taken from the same territory accessibility model used by the
-        // country-wise allocator, preventing two competing language systems.
         const territory = canonicalTerritoryForCountry(c) || c;
-        const access = Math.max(0, Number(territoryLanguageMatch(m, territory) || 0));
-        let basPotential = baselinePotential[c] || baselinePotential[territory] || 20;
-        // Keep language as accessibility rather than a direct collection
-        // multiplier: it changes the reachable portion of this market's base.
-        const accessShare = Math.max(0, Math.min(1, 0.45 + access * 0.32));
-        totalPotentialMarket += basPotential * accessShare;
+        const access = Math.max(0, Math.min(1.35, Number(territoryLanguageMatch(m, territory) || 0)));
+        const base = Number(baselinePotential[c] || baselinePotential[territory] || 20);
+        // Market size is access potential only; quality/pull determine how much is captured.
+        totalPotentialMarket += base * Math.max(0, Math.min(1, 0.42 + access * 0.30));
     });
-    
-    let captureRate = (m.popularity / 100) * 0.28;
-    let releaseWeek = m.releaseDate ? m.releaseDate.week : gameState.currentWeek;
-    let festivalMult = getFestivalMultiplier(releaseWeek, m.genres || [], m);
-    let genreMult = getGenreTrendMultiplier(m.genres || []);
-    
-    let baseCollection = totalPotentialMarket * captureRate * festivalMult * genreMult;
-    let variance = 0.85 + Math.random() * 0.3;
-    let opening = baseCollection * variance;
-    
+
+    const starPull = movieOpeningStarPull(m);
+    const quality = moviePerformanceQuality(m);
+    const writer = movieWriterQuality(m);
+    const director = movieDirectorQuality(m);
+    const marketing = Number.isFinite(Number(m.marketingTotal)) ? Math.max(0, Number(m.marketingTotal)) : 0;
+    const marketingScore = Math.max(20, Math.min(100, 38 + Math.log10(1 + marketing) * 22 + (m.marketingConfirmedLevel === 'worldwide' ? 16 : m.marketingConfirmedLevel === 'country' ? 9 : m.marketingConfirmedLevel === 'small' ? 4 : 0)));
+    const hype = Number.isFinite(Number(m.hypeScore)) ? Math.max(20, Math.min(100, Number(m.hypeScore))) : 50;
+    const franchise = (m.franchiseName && String(m.franchiseName).trim() !== '') || m.franchiseId ? 1.08 : 1;
+    const genre = typeof getGenreTrendMultiplier === 'function' ? getGenreTrendMultiplier(m.genres || []) : 1;
+    const releaseWeek = m.releaseDate ? m.releaseDate.week : gameState.currentWeek;
+    const festival = typeof getFestivalMultiplier === 'function' ? getFestivalMultiplier(releaseWeek, m.genres || [], m) : 1;
+    const competition = typeof computeCompetitionMultiplier === 'function' ? computeCompetitionMultiplier(m) : 1;
+
+    // Opening = market access × earned capture. Star pull leads; quality restrains the ceiling.
+    const starFactor = 0.55 + (starPull / 100) * 0.72;
+    const qualityFactor = 0.48 + (quality / 100) * 0.58;
+    const hypeFactor = 0.72 + (hype / 100) * 0.28;
+    const marketingFactor = 0.82 + (marketingScore / 100) * 0.28;
+    const talentAwareness = 0.88 + (writer / 100) * 0.05 + (director / 100) * 0.07;
+    const captureRate = Math.max(0.018, Math.min(0.24, 0.080 * starFactor * qualityFactor * hypeFactor * marketingFactor * talentAwareness));
+    const variance = 0.90 + Math.random() * 0.20;
+    const opening = totalPotentialMarket * captureRate * Math.max(0.85, Math.min(1.18, genre * festival * franchise * competition)) * variance;
     return parseFloat(Math.max(1.0, opening).toFixed(2));
 }
 
@@ -10445,19 +10312,19 @@ initializeNewFeatureUI();
     ['hero','heroine','villain','supporting','cameo'].forEach(r=>(m.cast&&m.cast[r]||[]).forEach(t=>out.push(t)));
     return out;
   }
-  function starPower(m){return avg((m.cast&&['hero','heroine'].flatMap(r=>m.cast[r]||[]).map(t=>n(t.starPower,70)))||[],70);}
-  function castActing(m){return avg(leadCast(m).map(t=>n(t.acting,75)),75);}
+  function starPower(m){return movieOpeningStarPull(m);}
+  function castActing(m){return movieCastQuality(m);}
   function franchiseScore(m){
     if(!m.franchiseId && !m.franchiseName)return 0;
     const fr=(gameState.franchises||[]).find(f=>f.id===m.franchiseId);
-    return clamp(n(fr&&fr.popularity,65)*0.55+n(fr&&fr.reputation,65)*0.45);
+    return clamp(n(fr&&fr.popularity,55)*0.55+n(fr&&fr.reputation,55)*0.45);
   }
   function marketValueScore(m){
     const leads=(m.cast&&['hero','heroine'].flatMap(r=>m.cast[r]||[]))||[];
     if(!leads.length)return starPower(m);
-    const vals=leads.map(t=>{try{return n(getActorMarketState(t).currentMarketValue, n(t.starPower,70));}catch(e){return n(t.starPower,70);}});
+    const vals=leads.map(t=>{try{return n(getActorMarketState(t).currentMarketValue, n(t.starPower,55));}catch(e){return n(t.starPower,55);}});
     const bases=leads.map(t=>{try{return n(getActorMarketState(t).baseMarketValue,100);}catch(e){return 100;}});
-    const ratio=avg(vals,100)/Math.max(1,avg(bases,100));
+    const ratio=avg(vals,55)/Math.max(1,avg(bases,100));
     return clamp(60+(ratio-1)*45);
   }
   function eventBuzz(m){
@@ -10479,17 +10346,13 @@ initializeNewFeatureUI();
     return clamp(50+(trend-1)*60);
   }
   function vfxScore(m){
-    const v=n(m.vfx&&m.vfx.quality,78);
-    const heavy=(m.genres||[]).some(g=>['Sci-Fi','Fantasy','Action','Adventure','War'].includes(g));
-    return heavy?v:clamp(72+(v-78)*0.6);
+    return movieVfxQuality(m);
   }
   function writerScore(m){
-    if(!m.writer)return 55;
-    return avg([n(m.writer.story,75),n(m.writer.screenplay,75),n(m.writer.dialogue,75),n(m.writer.creativity,75)],75);
+    return movieWriterQuality(m);
   }
   function directorScore(m){
-    if(!m.director)return 55;
-    return avg([n(m.director.direction,75),n(m.director.vision,75),n(m.director.creativity,75)],75);
+    return movieDirectorQuality(m);
   }
   function ensurePreReleaseState(m){
     if(!m)return;
@@ -10571,8 +10434,8 @@ initializeNewFeatureUI();
   }
   function forecast(m){
     ensurePreReleaseState(m); if(m.preMarketingForecast)return m.preMarketingForecast; if(m.trailerScore==null)runTrailerTesting(m);
-    const hype=clamp(n(m.hypeScore,60)), star=starPower(m), fr=franchiseScore(m), market=marketValueScore(m), reach=clamp((m.releaseCountries||[]).length*5,0,20);
-    const openingBase=Math.max(5,(hype*0.55+star*0.18+fr*0.12+market*0.10+reach*0.05)*2.1);
+    const hype=clamp(n(m.hypeScore,50)), star=starPower(m), fr=franchiseScore(m), market=marketValueScore(m), quality=moviePerformanceQuality(m);
+    const openingBase=Math.max(5,(hype*0.38+star*0.30+fr*0.08+market*0.07+quality*0.17)*1.45);
     const low=openingBase*0.72, high=openingBase*1.28;
     const audience=clamp((n(m.scriptQuality,60)*0.20+n(m.coherence,60)*0.10+castActing(m)*0.15+star*0.10+genreScore(m)*0.15+vfxScore(m)*0.10+eventBuzz(m)*0.05+writerScore(m)*0.05+directorScore(m)*0.10+50*0.10)/10);
     const critics=clamp((n(m.scriptQuality,60)*0.25+n(m.coherence,60)*0.10+directorScore(m)*0.15+castActing(m)*0.15+vfxScore(m)*0.10+writerScore(m)*0.05+genreScore(m)*0.10+eventBuzz(m)*0.05+marketValueScore(m)*0.05)/10);
@@ -10602,13 +10465,24 @@ initializeNewFeatureUI();
     return m.hypeScore;
   }
   function reviewCritics(m){
-    const story=n(m.scriptQuality,60), structure=n(m.coherence,60), direction=directorScore(m), acting=castActing(m), technical=vfxScore(m), dialogue=m.writer?n(m.writer.dialogue,75):60, coherence=n(m.coherence,60), originality=n(m.writer&&m.writer.creativity,75);
-    const variance=(Math.random()-0.5)*0.35;
-    return clamp((story*.25+structure*.15+direction*.15+acting*.15+technical*.10+dialogue*.05+coherence*.10+originality*.05)/10+variance,0,10);
+    const story=movieTalentMetric(m&&m.scriptQuality), writer=movieWriterQuality(m), director=movieDirectorQuality(m), cast=movieCastQuality(m), technical=movieVfxQuality(m), coherence=movieTalentMetric(m&&m.coherence);
+    const heavy=(m&&m.genres||[]).some(g=>['Sci-Fi','Fantasy','Action','Adventure','War'].includes(g));
+    const technicalWeight=heavy?0.10:0.035;
+    const score=(story*.22+writer*.30+director*.27+cast*.16+coherence*.05)*(1-technicalWeight)+technical*technicalWeight;
+    return clamp(score/10 + (Math.random()-0.5)*0.28,0,10);
   }
   function reviewAudience(m){
-    const entertainment=clamp(n(m.scriptQuality,60)*0.7+genreScore(m)*0.3), stars=starPower(m), emotional=clamp((n(m.coherence,60)*.55+castActing(m)*.45)), genre=genreScore(m), pacing=m.storySynergy&&m.storySynergy.includes('Mismatch')?45:m.storySynergy&&m.storySynergy.includes('Synergy')?88:70, ending=(m.ending&&['Happy Ending','Everyone Survives','Cliffhanger','Sequel Setup'].includes(m.ending))?82:70, spectacle=vfxScore(m), variance=(Math.random()-0.5)*0.35;
-    return clamp((entertainment*.20+stars*.15+emotional*.15+genre*.15+pacing*.10+ending*.10+spectacle*.10+70*.05)/10+variance,0,10);
+    const genres=m&&m.genres||[], story=movieTalentMetric(m&&m.scriptQuality), writer=movieWriterQuality(m), director=movieDirectorQuality(m), cast=movieCastQuality(m), coherence=movieTalentMetric(m&&m.coherence), technical=movieVfxQuality(m);
+    let entertainment=story*.24+writer*.25+director*.20+cast*.26+coherence*.05;
+    const all=territoryAllCast(m);
+    const roleTotal=all.reduce((s,x)=>s+x.roleWeight,0)||1;
+    if(genres.includes('Action')){const action=all.reduce((s,x)=>s+movieTalentMetric(x.talent.action)*x.roleWeight,0)/roleTotal;entertainment=entertainment*.88+action*.12;}
+    else if(genres.includes('Comedy')){const comedy=all.reduce((s,x)=>s+movieTalentMetric(x.talent.comedy)*x.roleWeight,0)/roleTotal;entertainment=entertainment*.88+comedy*.12;}
+    let ending=0;if(m&&['Happy Ending','Everyone Survives'].includes(m.ending))ending=genres.some(g=>['Comedy','Romance','Family'].includes(g))?4:1;else if(m&&['Sad Ending','Hero Sacrifice','Bittersweet'].includes(m.ending))ending=genres.some(g=>['Drama','War','Historical','Biography'].includes(g))?4:-4;else if(m&&['Cliffhanger','Sequel Setup'].includes(m.ending))ending=2;
+    if(m&&m.storySynergy&&m.storySynergy.includes('Mismatch'))ending-=7;else if(m&&m.storySynergy&&m.storySynergy.includes('Synergy'))ending+=4;
+    if(m&&genres.includes('Romance')&&m.songType==='Romantic'&&m.songCount>=3)ending+=3;if(m&&genres.includes('Drama')&&m.songType==='Emotional'&&m.songCount>=2)ending+=3;
+    const heavy=genres.some(g=>['Sci-Fi','Fantasy','Action','Adventure','War'].includes(g)),vw=heavy?0.09:0.025;
+    return clamp((entertainment*(1-vw)+technical*vw+ending)/10+(Math.random()-0.5)*0.28,0,10);
   }
   function ensureReviews(m){
     ensurePreReleaseState(m);
@@ -10905,22 +10779,19 @@ initializeNewFeatureUI();
       return /singer|vocal|musician|music artist|playback|recording artist|composer|music director|artist/.test(marker)
         || ['musicStarPower','musicStarpower','singingStarPower','singerStarPower','musicAppeal','singingAbility','vocalAbility'].some(k=>Number.isFinite(Number(t[k])));
     }
-    function musicArtistPool(){
-      const dedicated=(typeof EMBEDDED_SINGERS_DATA!=='undefined'&&Array.isArray(EMBEDDED_SINGERS_DATA))?EMBEDDED_SINGERS_DATA:[];
-      return dedicated.length?dedicated:talentPool().filter(isMusicArtist);
-    }
+    function musicArtistPool(){return talentPool().filter(isMusicArtist);}
     function singerById(id){return musicArtistPool().find(a=>String(a.id)===String(id))||null;}
     function legacySingerRecordById(id){return talentPool().find(a=>String(a.id)===String(id))||null;}
     function musicAppealValue(t){
-      if(!t)return 50;
-      const keys=['musicStarPower','musicStarpower','singingStarPower','singerStarPower','musicAppeal','singingAbility','vocalAbility','musicPopularity','singerPopularity','starPower','overallRating','rating'];
+      if(!t||!isMusicArtist(t))return 50;
+      const keys=['musicStarPower','musicStarpower','singingStarPower','singerStarPower','musicAppeal','singingAbility','vocalAbility','musicPopularity','singerPopularity'];
       for(const k of keys){const v=Number(t[k]);if(Number.isFinite(v))return songClamp(v);}
       return 50;
     }
     function musicFeeValue(t){
-      if(!t)return 0;
-      const keys=['singerFee','musicArtistFee','musicFee','artistFee','singingFee','playbackFee','musicContractFee','artistContractFee','musicValue','fee','salary'];
-      for(const k of keys){const raw=t[k];const v=(typeof raw==='number')?raw:parseSalaryToNumber(raw);if(Number.isFinite(v)&&v>=0)return v;}
+      if(!t||!isMusicArtist(t))return 0;
+      const keys=['singerFee','musicArtistFee','musicFee','artistFee','singingFee','playbackFee','musicContractFee','artistContractFee','musicValue'];
+      for(const k of keys){const v=Number(t[k]);if(Number.isFinite(v)&&v>=0)return v;}
       return 0;
     }
     function castById(m,id){return ['hero','villain','heroine','supporting','cameo'].flatMap(r=>(m.cast&&m.cast[r])||[]).find(a=>String(a.id)===String(id))||null;}
@@ -11008,25 +10879,6 @@ initializeNewFeatureUI();
       return 0.92;
     }
     function songBudgetTotal(song){return songRound(Object.values(song.budget||{}).reduce((a,v)=>a+Math.max(0,songNum(v,0)),0));}
-    function calculateSongBudget(song,m){
-      if(!song)return 0;
-      if(!song.budget||typeof song.budget!=='object')song.budget={};
-      const singerFee=songRound((song.singers||[]).reduce((sum,id)=>sum+musicFeeValue(singerById(id)),0));
-      const singerPower=song.singers&&song.singers.length?songAvg(song.singers.map(id=>musicAppealValue(singerById(id))),50):50;
-      const quality=songClamp((songNum(song.quality,70)+songNum(song.musicQuality,70)+songNum(song.lyricsQuality,70)+songNum(song.choreography,70))/4);
-      const typeFactor={Romantic:1.08,Party:1.12,Dance:1.16,Emotional:1.02,Sad:0.96,Folk:0.92,Devotional:0.90,Celebration:1.08,Theme:0.94,Action:1.18,Promotional:0.86,Other:1.00}[song.type]||1;
-      const qualityFactor=0.72+quality/100*0.56;
-      const singerFactor=0.72+singerPower/100*0.58;
-      const reachFactor=1+Math.min(0.28,(song.releaseCountries||[]).length*0.025);
-      const creativeBase=Math.max(0.65,(1.10+singerFee*0.16)*qualityFactor*typeFactor*singerFactor*reachFactor);
-      const productionBase=Math.max(0.85,(0.90+singerFee*0.10)*qualityFactor*reachFactor);
-      const weights={musicComposition:.32,lyrics:.11,choreographer:.08,dancers:.05,location:.05,setConstruction:.04,costumes:.04,makeupStyling:.025,equipment:.04,productionCrew:.055,travel:.025,accommodation:.02,vfxPost:.025,editing:.04,recording:.045,mixingMastering:.02,promotion:.045,other:.01};
-      const keys=Object.keys(weights);const weightTotal=keys.reduce((a,k)=>a+weights[k],0);
-      keys.forEach(k=>{song.budget[k]=songRound(productionBase*weights[k]/weightTotal + creativeBase*(k==='musicComposition'?.70:k==='lyrics'?.22:k==='choreographer'?.10:k==='recording'?.08:k==='mixingMastering'?.05:0)/1);});
-      song.budget.singerFee=singerFee;
-      song.budgetAutoGenerated=true;
-      return songBudgetTotal(song);
-    }
     function buzzMarketingReach(m){
       const spend=Math.max(0,songNum(m&&m.marketingTotal,0));
       const level=m&&m.marketingConfirmedLevel;
@@ -11142,19 +10994,17 @@ initializeNewFeatureUI();
       card.innerHTML=`<div class="mkt-category-title">📣 PRE-RELEASE BUZZ <span style="font-size:.72rem;color:#64748b;font-weight:500;">Awareness / interest — not collection</span></div><div class="rdash-stats-grid">${[['Final Buzz',m.preReleaseBuzz+'/100'],['Star Buzz',c.starBuzz+'/100'],['Trailer',c.trailerResponse+'/100'],['Marketing',c.marketingPromotion+'/100'],['Music Buzz',c.musicBuzz+'/100'],['Teaser',c.teaserResponse+'/100'],['Public / Social',c.publicSocialBuzz+'/100'],['Franchise',c.franchiseRecognition+'/100'],['Genre Demand',c.genreDemand+'/100'],['Industry',c.industryBuzz+'/100']].map(x=>`<div class="rdash-stat-card"><div class="rdash-stat-label">${x[0]}</div><div class="rdash-stat-value" style="font-size:1.15rem;">${x[1]}</div></div>`).join('')}</div><p style="margin-top:10px;color:#64748b;font-size:.82rem;">Buzz builds awareness and interest. It does not directly multiply Opening Weekend or transfer money into movie collection.</p>`;
     }
 
-    function singerOptions(selected){const pool=musicArtistPool().sort((a,b)=>musicAppealValue(b)-musicAppealValue(a)).slice(0,200);if(!pool.length)return '<option value="">No singers loaded — import Singers JSON</option>';return pool.map(t=>`<option value="${escapeHtml(t.id)}" ${selected==String(t.id)?'selected':''}>${escapeHtml(t.name||'Artist')} · ${Math.round(musicAppealValue(t))}/100 · ₹${musicFeeValue(t).toFixed(2)} Cr</option>`).join('');}
+    function singerOptions(selected){return musicArtistPool().sort((a,b)=>musicAppealValue(b)-musicAppealValue(a)).slice(0,80).map(t=>`<option value="${t.id}" ${selected==String(t.id)?'selected':''}>${escapeHtml(t.name||'Artist')} · ${Math.round(musicAppealValue(t))}/100</option>`).join('');}
     function songCardHtml(song,index,m){
-      const released=song.released;
-      calculateSongBudget(song,m);
       const castOptions=['hero','heroine','villain','supporting','cameo'].flatMap(r=>(m.cast&&m.cast[r])||[]).map(t=>`<label style="display:block;margin:5px 0;"><input type="checkbox" data-song-cast="${t.id}" ${song.castIds.map(String).includes(String(t.id))?'checked':''}> ${escapeHtml(t.name||'Cast')}</label>`).join('')||'<span style="color:#64748b;">No movie cast available yet.</span>';
       const singerRows=[0,1,2].map(i=>`<select data-song-singer="${i}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px;margin-top:6px;"><option value="">${i?'Add another singer':'Select singer'}</option>${singerOptions(song.singers[i])}</select>`).join('');
       const budgetLabels={singerFee:'Singer Fee',musicComposition:'Music / Composition',lyrics:'Lyrics',choreographer:'Choreographer',dancers:'Dancers',location:'Location',setConstruction:'Set Construction',costumes:'Costumes',makeupStyling:'Makeup / Styling',equipment:'Equipment',productionCrew:'Production Crew',travel:'Travel',accommodation:'Accommodation',vfxPost:'VFX / Post-production',editing:'Editing',recording:'Recording',mixingMastering:'Mixing / Mastering',promotion:'Promotion',other:'Other'};
-      calculateSongBudget(song,m);
-      const budgetInputs=Object.entries(budgetLabels).map(([k,label])=>`<label style="font-size:11px;color:#475569;display:block;">${label}<input type="number" min="0" step="0.01" data-song-budget="${k}" value="${songNum(song.budget[k],0)}" readonly ${released?'disabled':''} style="width:100%;margin-top:4px;padding:7px;border:1px solid #cbd5e1;border-radius:7px;background:#f1f5f9;color:#334155;"></label>`).join('');
+      const budgetInputs=Object.entries(budgetLabels).map(([k,label])=>`<label style="font-size:11px;color:#475569;display:block;">${label}<input type="number" min="0" step="0.01" data-song-budget="${k}" value="${songNum(song.budget[k],0)}" style="width:100%;margin-top:4px;padding:7px;border:1px solid #cbd5e1;border-radius:7px;"></label>`).join('');
       const langButtons=SONG_LANGUAGES.map(x=>`<button type="button" data-song-lang="${escapeHtml(x)}" style="padding:7px 9px;border:1px solid #cbd5e1;border-radius:8px;background:${song.originalLanguage===x?'#eff6ff':'#fff'};color:${song.originalLanguage===x?'#2563eb':'#334155'};cursor:pointer;">${escapeHtml(x)}</button>`).join('');
       const dubButtons=SONG_DUBS.map(x=>`<label style="font-size:11px;margin:3px 5px 3px 0;display:inline-block;"><input type="checkbox" data-song-dub="${escapeHtml(x)}" ${song.dubbingLanguages.includes(x)?'checked':''}> ${escapeHtml(x)}</label>`).join('');
       const countryRows=SONG_COUNTRIES.map(([c,flag])=>`<label style="display:inline-block;margin:4px 6px 4px 0;font-size:11px;"><input type="checkbox" data-song-country="${escapeHtml(c)}" ${song.releaseCountries.includes(c)?'checked':''}> ${flag} ${escapeHtml(c)}</label>`).join('');
-      return `<div class="mkt-category-card" data-song-card="${index}" style="margin-top:14px;${released?'border-color:#86efac;':''}"><div class="mkt-category-title">🎵 SONG ${index+1}${released?' · RELEASED':''}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;"><label style="font-size:11px;color:#475569;">Song Name<input data-song-name type="text" value="${escapeHtml(song.name)}" placeholder="Enter separate song name" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;"></label><label style="font-size:11px;color:#475569;">Song Type<select data-song-type style="width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;" ${released?'disabled':''}>${SONG_TYPES.map(x=>`<option ${song.type===x?'selected':''}>${x}</option>`).join('')}</select></label></div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">SINGERS</div>${singerRows}</div><div style="margin-top:12px;padding:10px;background:#f8fafc;border-radius:10px;"><div style="font-size:11px;font-weight:800;color:#475569;">SONG CAST — ADDITIONAL CAST FEE: ₹0 Cr</div>${castOptions}</div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">ORIGINAL LANGUAGE</div><div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;">${langButtons}</div></div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">DUBBING LANGUAGES</div>${dubButtons}</div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">COUNTRY RELEASE — UNSELECTED = ₹0 COLLECTION</div>${countryRows}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;"><label style="font-size:11px;color:#475569;">Shooting Location<input data-song-location type="text" value="${escapeHtml(song.shootingLocation)}" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;"></label><div style="font-size:11px;color:#475569;padding:9px;background:#f8fafc;border-radius:8px;">Current Song Budget<br><strong style="font-size:15px;">₹${songBudgetTotal(song).toFixed(2)} Cr</strong><br><span style="color:#64748b;">Auto-calculated by the game. Movie cast fee is never added.</span></div></div><div style="margin-top:12px;padding:9px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;color:#1e3a8a;font-size:11px;font-weight:700;">💰 SONG BUDGET — AUTO-CALCULATED BY GAME. You cannot manually set production costs.</div><div style="margin-top:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">${budgetInputs}</div><div style="margin-top:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">${[['quality','Song Quality'],['musicQuality','Music Quality'],['lyricsQuality','Lyrics'],['choreography','Choreography']].map(([k,l])=>`<label style="font-size:10px;color:#475569;">${l}<input type="number" min="0" max="100" data-song-score="${k}" value="${songNum(song[k],70)}" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:7px;border:1px solid #cbd5e1;border-radius:7px;"></label>`).join('')}</div><label style="display:block;font-size:10px;color:#475569;margin-top:8px;">Song Promotion / Push <input type="number" min="0" max="100" data-song-score="promotion" value="${songNum(song.promotion,50)}" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:7px;border:1px solid #cbd5e1;border-radius:7px;"></label><div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">${released?`<span class="wd-btn" style="background:#ecfdf5;border-color:#86efac;color:#166534;">Response: ${escapeHtml(song.response||'—')} · ${Math.round(song.responseScore)}/100</span><span class="wd-btn" style="background:#fdf2f8;border-color:#f9a8d4;color:#9d174d;">Song Collection: ₹${song.collection.toFixed(2)} Cr</span>`:`<button type="button" class="wd-btn" data-song-save="${index}" style="background:#2563eb;border-color:#2563eb;">SAVE SONG</button><button type="button" class="wd-btn" data-song-release="${index}" style="background:#db2777;border-color:#db2777;">RELEASE SONG</button>`}</div></div>`;
+      const released=song.released;
+      return `<div class="mkt-category-card" data-song-card="${index}" style="margin-top:14px;${released?'border-color:#86efac;':''}"><div class="mkt-category-title">🎵 SONG ${index+1}${released?' · RELEASED':''}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;"><label style="font-size:11px;color:#475569;">Song Name<input data-song-name type="text" value="${escapeHtml(song.name)}" placeholder="Enter separate song name" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;"></label><label style="font-size:11px;color:#475569;">Song Type<select data-song-type style="width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;" ${released?'disabled':''}>${SONG_TYPES.map(x=>`<option ${song.type===x?'selected':''}>${x}</option>`).join('')}</select></label></div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">SINGERS</div>${singerRows}</div><div style="margin-top:12px;padding:10px;background:#f8fafc;border-radius:10px;"><div style="font-size:11px;font-weight:800;color:#475569;">SONG CAST — ADDITIONAL CAST FEE: ₹0 Cr</div>${castOptions}</div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">ORIGINAL LANGUAGE</div><div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;">${langButtons}</div></div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">DUBBING LANGUAGES</div>${dubButtons}</div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">COUNTRY RELEASE — UNSELECTED = ₹0 COLLECTION</div>${countryRows}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;"><label style="font-size:11px;color:#475569;">Shooting Location<input data-song-location type="text" value="${escapeHtml(song.shootingLocation)}" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;"></label><div style="font-size:11px;color:#475569;padding:9px;background:#f8fafc;border-radius:8px;">Current Song Budget<br><strong style="font-size:15px;">₹${songBudgetTotal(song).toFixed(2)} Cr</strong><br><span style="color:#64748b;">Movie cast fee is never added.</span></div></div><div style="margin-top:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">${budgetInputs}</div><div style="margin-top:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">${[['quality','Song Quality'],['musicQuality','Music Quality'],['lyricsQuality','Lyrics'],['choreography','Choreography']].map(([k,l])=>`<label style="font-size:10px;color:#475569;">${l}<input type="number" min="0" max="100" data-song-score="${k}" value="${songNum(song[k],70)}" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:7px;border:1px solid #cbd5e1;border-radius:7px;"></label>`).join('')}</div><label style="display:block;font-size:10px;color:#475569;margin-top:8px;">Song Promotion / Push <input type="number" min="0" max="100" data-song-score="promotion" value="${songNum(song.promotion,50)}" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:7px;border:1px solid #cbd5e1;border-radius:7px;"></label><div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">${released?`<span class="wd-btn" style="background:#ecfdf5;border-color:#86efac;color:#166534;">Response: ${escapeHtml(song.response||'—')} · ${Math.round(song.responseScore)}/100</span><span class="wd-btn" style="background:#fdf2f8;border-color:#f9a8d4;color:#9d174d;">Song Collection: ₹${song.collection.toFixed(2)} Cr</span>`:`<button type="button" class="wd-btn" data-song-save="${index}" style="background:#2563eb;border-color:#2563eb;">SAVE SONG</button><button type="button" class="wd-btn" data-song-release="${index}" style="background:#db2777;border-color:#db2777;">RELEASE SONG</button>`}</div></div>`;
     }
     function syncSongFromCard(song,card){
       song.name=card.querySelector('[data-song-name]')?.value.trim()||'';song.type=card.querySelector('[data-song-type]')?.value||'Other';song.shootingLocation=card.querySelector('[data-song-location]')?.value.trim()||'India';
@@ -11162,14 +11012,19 @@ initializeNewFeatureUI();
       song.castIds=[...card.querySelectorAll('[data-song-cast]:checked')].map(x=>x.getAttribute('data-song-cast'));
       song.dubbingLanguages=[...card.querySelectorAll('[data-song-dub]:checked')].map(x=>x.getAttribute('data-song-dub'));
       song.releaseCountries=[...card.querySelectorAll('[data-song-country]:checked')].map(x=>x.getAttribute('data-song-country'));
+      card.querySelectorAll('[data-song-budget]').forEach(x=>song.budget[x.getAttribute('data-song-budget')]=Math.max(0,songNum(x.value,0)));
       card.querySelectorAll('[data-song-score]').forEach(x=>song[x.getAttribute('data-song-score')]=songClamp(songNum(x.value,70)));
-      calculateSongBudget(song, getActiveMovie());
     }
-    function renderSongs(){const m=getActiveMovie();if(!m)return;ensureSongState(m);m.songs.forEach(s=>{if(!s.released)calculateSongBudget(s,m);});document.getElementById('songMovieTitle').innerText=m.name;const host=document.getElementById('songReleaseCard');host.innerHTML=`<div style="padding:12px;background:#fdf2f8;border-radius:10px;margin-bottom:10px;color:#9d174d;font-size:12px;">Each song is independent. Song Collection and Song Budget are separate from Movie Collection and Movie Budget. A country not selected below always produces ₹0 song collection in that country.</div>${m.songs.map((s,i)=>songCardHtml(s,i,m)).join('')||'<div class="mkt-category-card">No songs configured for this movie. The existing movie song-count choice remains supported; save the movie and reopen this manager to create its song entities.</div>'}`;
-      host.querySelectorAll('[data-song-card]').forEach(card=>{const i=Number(card.getAttribute('data-song-card'));card.querySelectorAll('[data-song-lang]').forEach(btn=>btn.onclick=()=>{m.songs[i].originalLanguage=btn.getAttribute('data-song-lang');renderSongs();});card.querySelectorAll('[data-song-singer],[data-song-type],[data-song-score]').forEach(el=>el.addEventListener('change',()=>{syncSongFromCard(m.songs[i],card);renderSongs();}));card.querySelector('[data-song-save]')?.addEventListener('click',()=>{syncSongFromCard(m.songs[i],card);if(!m.songs[i].name){alert('Please enter a separate song name.');return;}calculateSongBudget(m.songs[i],m);calculateBuzz(m);renderSongs();});card.querySelector('[data-song-release]')?.addEventListener('click',()=>{syncSongFromCard(m.songs[i],card);releaseSong(m,i);});});
+    function renderSongs(){const m=getActiveMovie();if(!m)return;ensureSongState(m);document.getElementById('songMovieTitle').innerText=m.name;const host=document.getElementById('songReleaseCard');host.innerHTML=`<div style="padding:12px;background:#fdf2f8;border-radius:10px;margin-bottom:10px;color:#9d174d;font-size:12px;">Each song is independent. Song Collection and Song Budget are separate from Movie Collection and Movie Budget. A country not selected below always produces ₹0 song collection in that country.</div>${m.songs.map((s,i)=>songCardHtml(s,i,m)).join('')||'<div class="mkt-category-card">No songs configured for this movie. The existing movie song-count choice remains supported; save the movie and reopen this manager to create its song entities.</div>'}`;
+      host.querySelectorAll('[data-song-card]').forEach(card=>{const i=Number(card.getAttribute('data-song-card'));card.querySelectorAll('[data-song-lang]').forEach(btn=>btn.onclick=()=>{m.songs[i].originalLanguage=btn.getAttribute('data-song-lang');renderSongs();});card.querySelector('[data-song-save]')?.addEventListener('click',()=>{syncSongFromCard(m.songs[i],card);if(!m.songs[i].name){alert('Please enter a separate song name.');return;}ensureSongSingerFee(m.songs[i]);calculateBuzz(m);renderSongs();});card.querySelector('[data-song-release]')?.addEventListener('click',()=>{syncSongFromCard(m.songs[i],card);releaseSong(m,i);});});
     }
-    function ensureSongSingerFee(song){if(!song)return 0;calculateSongBudget(song,getActiveMovie());return song.budget.singerFee;}
-    function releaseSong(m,index){const song=m.songs[index];if(!song)return;if(!song.name){alert('Please enter a separate song name.');return;}if(!song.releaseCountries.length){alert('Select at least one country for the song release. Unselected countries remain ₹0 collection.');return;}calculateSongBudget(song,m);const total=songBudgetTotal(song);if(gameState.cashOnHand<total){alert(`Insufficient cash to produce/release this song.\nSong Budget: ₹${total.toFixed(2)} Cr\nAvailable Cash: ₹${songNum(gameState.cashOnHand,0).toFixed(2)} Cr`);return;}gameState.cashOnHand-=total;calculateSongResponse(song,m);calculateSongBuzz(song,m);calculateSongCollection(song,m);song.released=true;song.releasedAt={week:gameState.currentWeek,year:gameState.currentYear};song.musicBuzzContribution=song.buzz;song.collectionByCountry=Object.fromEntries(SONG_COUNTRIES.map(([c])=>[c,Math.max(0,songNum(song.collectionByCountry[c],0))]));song.collection=songRound(Object.values(song.collectionByCountry).reduce((a,b)=>a+Math.max(0,songNum(b,0)),0));calculateBuzz(m);renderSongs();updateDashboardUI();alert(`Song released: ${song.name}\nResponse: ${song.response} (${song.responseScore}/100)\nSong Budget: ₹${total.toFixed(2)} Cr\nSong Collection: ₹${song.collection.toFixed(2)} Cr\nMusic Buzz Contribution: ${song.buzz}/100\nMovie collection was not changed.`);}
+    function ensureSongSingerFee(song){
+      if(!song.budget||typeof song.budget!=='object')song.budget={};
+      const calculated=song.singers.reduce((sum,id)=>{const t=singerById(id);return sum+musicFeeValue(t);},0);
+      song.budget.singerFee=songRound(calculated);
+      return song.budget.singerFee;
+    }
+    function releaseSong(m,index){const song=m.songs[index];if(!song)return;if(!song.name){alert('Please enter a separate song name.');return;}if(!song.releaseCountries.length){alert('Select at least one country for the song release. Unselected countries remain ₹0 collection.');return;}ensureSongSingerFee(song);const total=songBudgetTotal(song);if(gameState.cashOnHand<total){alert(`Insufficient cash to produce/release this song.\nSong Budget: ₹${total.toFixed(2)} Cr\nAvailable Cash: ₹${songNum(gameState.cashOnHand,0).toFixed(2)} Cr`);return;}gameState.cashOnHand-=total;calculateSongResponse(song,m);calculateSongBuzz(song,m);calculateSongCollection(song,m);song.released=true;song.releasedAt={week:gameState.currentWeek,year:gameState.currentYear};song.musicBuzzContribution=song.buzz;song.collectionByCountry=Object.fromEntries(SONG_COUNTRIES.map(([c])=>[c,Math.max(0,songNum(song.collectionByCountry[c],0))]));song.collection=songRound(Object.values(song.collectionByCountry).reduce((a,b)=>a+Math.max(0,songNum(b,0)),0));calculateBuzz(m);renderSongs();updateDashboardUI();alert(`Song released: ${song.name}\nResponse: ${song.response} (${song.responseScore}/100)\nSong Budget: ₹${total.toFixed(2)} Cr\nSong Collection: ₹${song.collection.toFixed(2)} Cr\nMusic Buzz Contribution: ${song.buzz}/100\nMovie collection was not changed.`);}
     function songMigration(state){if(!state)return state;(state.movies||[]).forEach(m=>{ensureSongState(m);if(!m.released)calculateBuzz(m);});(state.completedMovies||[]).forEach(m=>ensureSongState(m));return state;}
 
     // Public pre-release buzz refresh hooks. These wrappers preserve the old
