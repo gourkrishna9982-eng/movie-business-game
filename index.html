@@ -1819,6 +1819,17 @@ body {
 
         <div class="db-import-row">
             <div>
+                <h4>Singers Database</h4>
+                <p id="singersCountLabel">Loaded: 0 records</p>
+            </div>
+            <label class="btn-import-file">
+                <i class="fa-solid fa-upload"></i> Load JSON
+                <input type="file" accept=".json" style="display:none;" onchange="loadCustomJSON('singers', this)">
+            </label>
+        </div>
+
+        <div class="db-import-row">
+            <div>
                 <h4>VFX Studios Database</h4>
                 <p id="vfxCountLabel">Loaded: 20 records</p>
             </div>
@@ -3725,6 +3736,9 @@ let EMBEDDED_ACTRESSES_DATA = ACTRESSES_TUPLES.map(t => ({
   starPower: t[12], salary: t[13], experience: t[14], fanBase: t[15], status: t[16], gender: "Female"
 }));
 
+/* SOURCE DATA FOR SINGERS (DEDICATED JSON DATABASE) */
+let EMBEDDED_SINGERS_DATA = [];
+
 /* SOURCE DATA FOR VFX STUDIOS (INITIAL FALLBACK TUPLES) */
 const VFX_TUPLES = [
   [1,"Industrial Light & Magic (ILM)","United States","San Francisco","Global",["VFX","CGI","Creature FX","Virtual Production","Environment FX"],98,99,96,88,96,99,12.5,30,180.0,"Available"],
@@ -3938,6 +3952,17 @@ function parseSalaryToNumber(sal) {
     return cleaned ? parseFloat(cleaned) : 0;
 }
 
+function normalizeSingerJSONRecord(item,index){
+    const src=item&&typeof item==='object'?item:{};
+    const feeKeys=['singerFee','musicArtistFee','musicFee','artistFee','singingFee','playbackFee','musicContractFee','artistContractFee','musicValue','fee','salary'];
+    let fee=0;
+    for(const k of feeKeys){const raw=src[k];const v=(typeof raw==='number')?raw:parseSalaryToNumber(raw);if(Number.isFinite(v)&&v>=0){fee=v;break;}}
+    const appealKeys=['musicStarPower','musicStarpower','singingStarPower','singerStarPower','musicAppeal','singingAbility','vocalAbility','musicPopularity','singerPopularity','starPower','overallRating','rating'];
+    let appeal=50;
+    for(const k of appealKeys){const v=Number(src[k]);if(Number.isFinite(v)){appeal=Math.max(0,Math.min(100,v));break;}}
+    return {...src,id:src.id!=null?src.id:`singer_${index+1}`,name:src.name||src.artistName||src.singerName||`Singer ${index+1}`,singerFee:fee,musicStarPower:appeal,status:src.status||'Available',languages:Array.isArray(src.languages)?src.languages:(src.languages?[src.languages]:[])};
+}
+
 /* ==========================================================================
    JSON FILE IMPORT SYSTEM FUNCTION
    ========================================================================== */
@@ -3972,6 +3997,10 @@ function loadCustomJSON(type, inputElement) {
                 populateActorFilters();
                 renderActorsTable();
                 alert(`Successfully loaded ${data.length} Female Actresses from ${file.name}`);
+            } else if(type === 'singers') {
+                EMBEDDED_SINGERS_DATA = data.map((item, index) => normalizeSingerJSONRecord(item, index));
+                if(window.renderSongRelease) window.renderSongRelease();
+                alert(`Successfully loaded ${data.length} Singers from ${file.name}`);
             } else if(type === 'vfx') {
                 EMBEDDED_VFX_DATA = data;
                 populateVFXFilters();
@@ -3992,6 +4021,7 @@ function updateDatabaseCountsUI() {
         document.getElementById('directorsCountLabel').innerText = `Loaded: ${EMBEDDED_DIRECTORS_DATA.length} records`;
         document.getElementById('actorsCountLabel').innerText = `Loaded: ${EMBEDDED_ACTORS_DATA.length} records`;
         document.getElementById('actressesCountLabel').innerText = `Loaded: ${EMBEDDED_ACTRESSES_DATA.length} records`;
+        if(document.getElementById('singersCountLabel')) document.getElementById('singersCountLabel').innerText = `Loaded: ${EMBEDDED_SINGERS_DATA.length} records`;
         document.getElementById('vfxCountLabel').innerText = `Loaded: ${EMBEDDED_VFX_DATA.length} records`;
     }
 }
@@ -10875,19 +10905,22 @@ initializeNewFeatureUI();
       return /singer|vocal|musician|music artist|playback|recording artist|composer|music director|artist/.test(marker)
         || ['musicStarPower','musicStarpower','singingStarPower','singerStarPower','musicAppeal','singingAbility','vocalAbility'].some(k=>Number.isFinite(Number(t[k])));
     }
-    function musicArtistPool(){return talentPool().filter(isMusicArtist);}
+    function musicArtistPool(){
+      const dedicated=(typeof EMBEDDED_SINGERS_DATA!=='undefined'&&Array.isArray(EMBEDDED_SINGERS_DATA))?EMBEDDED_SINGERS_DATA:[];
+      return dedicated.length?dedicated:talentPool().filter(isMusicArtist);
+    }
     function singerById(id){return musicArtistPool().find(a=>String(a.id)===String(id))||null;}
     function legacySingerRecordById(id){return talentPool().find(a=>String(a.id)===String(id))||null;}
     function musicAppealValue(t){
-      if(!t||!isMusicArtist(t))return 50;
-      const keys=['musicStarPower','musicStarpower','singingStarPower','singerStarPower','musicAppeal','singingAbility','vocalAbility','musicPopularity','singerPopularity'];
+      if(!t)return 50;
+      const keys=['musicStarPower','musicStarpower','singingStarPower','singerStarPower','musicAppeal','singingAbility','vocalAbility','musicPopularity','singerPopularity','starPower','overallRating','rating'];
       for(const k of keys){const v=Number(t[k]);if(Number.isFinite(v))return songClamp(v);}
       return 50;
     }
     function musicFeeValue(t){
-      if(!t||!isMusicArtist(t))return 0;
-      const keys=['singerFee','musicArtistFee','musicFee','artistFee','singingFee','playbackFee','musicContractFee','artistContractFee','musicValue'];
-      for(const k of keys){const v=Number(t[k]);if(Number.isFinite(v)&&v>=0)return v;}
+      if(!t)return 0;
+      const keys=['singerFee','musicArtistFee','musicFee','artistFee','singingFee','playbackFee','musicContractFee','artistContractFee','musicValue','fee','salary'];
+      for(const k of keys){const raw=t[k];const v=(typeof raw==='number')?raw:parseSalaryToNumber(raw);if(Number.isFinite(v)&&v>=0)return v;}
       return 0;
     }
     function castById(m,id){return ['hero','villain','heroine','supporting','cameo'].flatMap(r=>(m.cast&&m.cast[r])||[]).find(a=>String(a.id)===String(id))||null;}
@@ -10975,6 +11008,25 @@ initializeNewFeatureUI();
       return 0.92;
     }
     function songBudgetTotal(song){return songRound(Object.values(song.budget||{}).reduce((a,v)=>a+Math.max(0,songNum(v,0)),0));}
+    function calculateSongBudget(song,m){
+      if(!song)return 0;
+      if(!song.budget||typeof song.budget!=='object')song.budget={};
+      const singerFee=songRound((song.singers||[]).reduce((sum,id)=>sum+musicFeeValue(singerById(id)),0));
+      const singerPower=song.singers&&song.singers.length?songAvg(song.singers.map(id=>musicAppealValue(singerById(id))),50):50;
+      const quality=songClamp((songNum(song.quality,70)+songNum(song.musicQuality,70)+songNum(song.lyricsQuality,70)+songNum(song.choreography,70))/4);
+      const typeFactor={Romantic:1.08,Party:1.12,Dance:1.16,Emotional:1.02,Sad:0.96,Folk:0.92,Devotional:0.90,Celebration:1.08,Theme:0.94,Action:1.18,Promotional:0.86,Other:1.00}[song.type]||1;
+      const qualityFactor=0.72+quality/100*0.56;
+      const singerFactor=0.72+singerPower/100*0.58;
+      const reachFactor=1+Math.min(0.28,(song.releaseCountries||[]).length*0.025);
+      const creativeBase=Math.max(0.65,(1.10+singerFee*0.16)*qualityFactor*typeFactor*singerFactor*reachFactor);
+      const productionBase=Math.max(0.85,(0.90+singerFee*0.10)*qualityFactor*reachFactor);
+      const weights={musicComposition:.32,lyrics:.11,choreographer:.08,dancers:.05,location:.05,setConstruction:.04,costumes:.04,makeupStyling:.025,equipment:.04,productionCrew:.055,travel:.025,accommodation:.02,vfxPost:.025,editing:.04,recording:.045,mixingMastering:.02,promotion:.045,other:.01};
+      const keys=Object.keys(weights);const weightTotal=keys.reduce((a,k)=>a+weights[k],0);
+      keys.forEach(k=>{song.budget[k]=songRound(productionBase*weights[k]/weightTotal + creativeBase*(k==='musicComposition'?.70:k==='lyrics'?.22:k==='choreographer'?.10:k==='recording'?.08:k==='mixingMastering'?.05:0)/1);});
+      song.budget.singerFee=singerFee;
+      song.budgetAutoGenerated=true;
+      return songBudgetTotal(song);
+    }
     function buzzMarketingReach(m){
       const spend=Math.max(0,songNum(m&&m.marketingTotal,0));
       const level=m&&m.marketingConfirmedLevel;
@@ -11090,17 +11142,19 @@ initializeNewFeatureUI();
       card.innerHTML=`<div class="mkt-category-title">📣 PRE-RELEASE BUZZ <span style="font-size:.72rem;color:#64748b;font-weight:500;">Awareness / interest — not collection</span></div><div class="rdash-stats-grid">${[['Final Buzz',m.preReleaseBuzz+'/100'],['Star Buzz',c.starBuzz+'/100'],['Trailer',c.trailerResponse+'/100'],['Marketing',c.marketingPromotion+'/100'],['Music Buzz',c.musicBuzz+'/100'],['Teaser',c.teaserResponse+'/100'],['Public / Social',c.publicSocialBuzz+'/100'],['Franchise',c.franchiseRecognition+'/100'],['Genre Demand',c.genreDemand+'/100'],['Industry',c.industryBuzz+'/100']].map(x=>`<div class="rdash-stat-card"><div class="rdash-stat-label">${x[0]}</div><div class="rdash-stat-value" style="font-size:1.15rem;">${x[1]}</div></div>`).join('')}</div><p style="margin-top:10px;color:#64748b;font-size:.82rem;">Buzz builds awareness and interest. It does not directly multiply Opening Weekend or transfer money into movie collection.</p>`;
     }
 
-    function singerOptions(selected){return musicArtistPool().sort((a,b)=>musicAppealValue(b)-musicAppealValue(a)).slice(0,80).map(t=>`<option value="${t.id}" ${selected==String(t.id)?'selected':''}>${escapeHtml(t.name||'Artist')} · ${Math.round(musicAppealValue(t))}/100</option>`).join('');}
+    function singerOptions(selected){const pool=musicArtistPool().sort((a,b)=>musicAppealValue(b)-musicAppealValue(a)).slice(0,200);if(!pool.length)return '<option value="">No singers loaded — import Singers JSON</option>';return pool.map(t=>`<option value="${escapeHtml(t.id)}" ${selected==String(t.id)?'selected':''}>${escapeHtml(t.name||'Artist')} · ${Math.round(musicAppealValue(t))}/100 · ₹${musicFeeValue(t).toFixed(2)} Cr</option>`).join('');}
     function songCardHtml(song,index,m){
+      const released=song.released;
+      calculateSongBudget(song,m);
       const castOptions=['hero','heroine','villain','supporting','cameo'].flatMap(r=>(m.cast&&m.cast[r])||[]).map(t=>`<label style="display:block;margin:5px 0;"><input type="checkbox" data-song-cast="${t.id}" ${song.castIds.map(String).includes(String(t.id))?'checked':''}> ${escapeHtml(t.name||'Cast')}</label>`).join('')||'<span style="color:#64748b;">No movie cast available yet.</span>';
       const singerRows=[0,1,2].map(i=>`<select data-song-singer="${i}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px;margin-top:6px;"><option value="">${i?'Add another singer':'Select singer'}</option>${singerOptions(song.singers[i])}</select>`).join('');
       const budgetLabels={singerFee:'Singer Fee',musicComposition:'Music / Composition',lyrics:'Lyrics',choreographer:'Choreographer',dancers:'Dancers',location:'Location',setConstruction:'Set Construction',costumes:'Costumes',makeupStyling:'Makeup / Styling',equipment:'Equipment',productionCrew:'Production Crew',travel:'Travel',accommodation:'Accommodation',vfxPost:'VFX / Post-production',editing:'Editing',recording:'Recording',mixingMastering:'Mixing / Mastering',promotion:'Promotion',other:'Other'};
-      const budgetInputs=Object.entries(budgetLabels).map(([k,label])=>`<label style="font-size:11px;color:#475569;display:block;">${label}<input type="number" min="0" step="0.01" data-song-budget="${k}" value="${songNum(song.budget[k],0)}" style="width:100%;margin-top:4px;padding:7px;border:1px solid #cbd5e1;border-radius:7px;"></label>`).join('');
+      calculateSongBudget(song,m);
+      const budgetInputs=Object.entries(budgetLabels).map(([k,label])=>`<label style="font-size:11px;color:#475569;display:block;">${label}<input type="number" min="0" step="0.01" data-song-budget="${k}" value="${songNum(song.budget[k],0)}" readonly ${released?'disabled':''} style="width:100%;margin-top:4px;padding:7px;border:1px solid #cbd5e1;border-radius:7px;background:#f1f5f9;color:#334155;"></label>`).join('');
       const langButtons=SONG_LANGUAGES.map(x=>`<button type="button" data-song-lang="${escapeHtml(x)}" style="padding:7px 9px;border:1px solid #cbd5e1;border-radius:8px;background:${song.originalLanguage===x?'#eff6ff':'#fff'};color:${song.originalLanguage===x?'#2563eb':'#334155'};cursor:pointer;">${escapeHtml(x)}</button>`).join('');
       const dubButtons=SONG_DUBS.map(x=>`<label style="font-size:11px;margin:3px 5px 3px 0;display:inline-block;"><input type="checkbox" data-song-dub="${escapeHtml(x)}" ${song.dubbingLanguages.includes(x)?'checked':''}> ${escapeHtml(x)}</label>`).join('');
       const countryRows=SONG_COUNTRIES.map(([c,flag])=>`<label style="display:inline-block;margin:4px 6px 4px 0;font-size:11px;"><input type="checkbox" data-song-country="${escapeHtml(c)}" ${song.releaseCountries.includes(c)?'checked':''}> ${flag} ${escapeHtml(c)}</label>`).join('');
-      const released=song.released;
-      return `<div class="mkt-category-card" data-song-card="${index}" style="margin-top:14px;${released?'border-color:#86efac;':''}"><div class="mkt-category-title">🎵 SONG ${index+1}${released?' · RELEASED':''}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;"><label style="font-size:11px;color:#475569;">Song Name<input data-song-name type="text" value="${escapeHtml(song.name)}" placeholder="Enter separate song name" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;"></label><label style="font-size:11px;color:#475569;">Song Type<select data-song-type style="width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;" ${released?'disabled':''}>${SONG_TYPES.map(x=>`<option ${song.type===x?'selected':''}>${x}</option>`).join('')}</select></label></div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">SINGERS</div>${singerRows}</div><div style="margin-top:12px;padding:10px;background:#f8fafc;border-radius:10px;"><div style="font-size:11px;font-weight:800;color:#475569;">SONG CAST — ADDITIONAL CAST FEE: ₹0 Cr</div>${castOptions}</div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">ORIGINAL LANGUAGE</div><div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;">${langButtons}</div></div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">DUBBING LANGUAGES</div>${dubButtons}</div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">COUNTRY RELEASE — UNSELECTED = ₹0 COLLECTION</div>${countryRows}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;"><label style="font-size:11px;color:#475569;">Shooting Location<input data-song-location type="text" value="${escapeHtml(song.shootingLocation)}" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;"></label><div style="font-size:11px;color:#475569;padding:9px;background:#f8fafc;border-radius:8px;">Current Song Budget<br><strong style="font-size:15px;">₹${songBudgetTotal(song).toFixed(2)} Cr</strong><br><span style="color:#64748b;">Movie cast fee is never added.</span></div></div><div style="margin-top:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">${budgetInputs}</div><div style="margin-top:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">${[['quality','Song Quality'],['musicQuality','Music Quality'],['lyricsQuality','Lyrics'],['choreography','Choreography']].map(([k,l])=>`<label style="font-size:10px;color:#475569;">${l}<input type="number" min="0" max="100" data-song-score="${k}" value="${songNum(song[k],70)}" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:7px;border:1px solid #cbd5e1;border-radius:7px;"></label>`).join('')}</div><label style="display:block;font-size:10px;color:#475569;margin-top:8px;">Song Promotion / Push <input type="number" min="0" max="100" data-song-score="promotion" value="${songNum(song.promotion,50)}" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:7px;border:1px solid #cbd5e1;border-radius:7px;"></label><div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">${released?`<span class="wd-btn" style="background:#ecfdf5;border-color:#86efac;color:#166534;">Response: ${escapeHtml(song.response||'—')} · ${Math.round(song.responseScore)}/100</span><span class="wd-btn" style="background:#fdf2f8;border-color:#f9a8d4;color:#9d174d;">Song Collection: ₹${song.collection.toFixed(2)} Cr</span>`:`<button type="button" class="wd-btn" data-song-save="${index}" style="background:#2563eb;border-color:#2563eb;">SAVE SONG</button><button type="button" class="wd-btn" data-song-release="${index}" style="background:#db2777;border-color:#db2777;">RELEASE SONG</button>`}</div></div>`;
+      return `<div class="mkt-category-card" data-song-card="${index}" style="margin-top:14px;${released?'border-color:#86efac;':''}"><div class="mkt-category-title">🎵 SONG ${index+1}${released?' · RELEASED':''}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;"><label style="font-size:11px;color:#475569;">Song Name<input data-song-name type="text" value="${escapeHtml(song.name)}" placeholder="Enter separate song name" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;"></label><label style="font-size:11px;color:#475569;">Song Type<select data-song-type style="width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;" ${released?'disabled':''}>${SONG_TYPES.map(x=>`<option ${song.type===x?'selected':''}>${x}</option>`).join('')}</select></label></div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">SINGERS</div>${singerRows}</div><div style="margin-top:12px;padding:10px;background:#f8fafc;border-radius:10px;"><div style="font-size:11px;font-weight:800;color:#475569;">SONG CAST — ADDITIONAL CAST FEE: ₹0 Cr</div>${castOptions}</div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">ORIGINAL LANGUAGE</div><div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;">${langButtons}</div></div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">DUBBING LANGUAGES</div>${dubButtons}</div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">COUNTRY RELEASE — UNSELECTED = ₹0 COLLECTION</div>${countryRows}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;"><label style="font-size:11px;color:#475569;">Shooting Location<input data-song-location type="text" value="${escapeHtml(song.shootingLocation)}" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;"></label><div style="font-size:11px;color:#475569;padding:9px;background:#f8fafc;border-radius:8px;">Current Song Budget<br><strong style="font-size:15px;">₹${songBudgetTotal(song).toFixed(2)} Cr</strong><br><span style="color:#64748b;">Auto-calculated by the game. Movie cast fee is never added.</span></div></div><div style="margin-top:12px;padding:9px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;color:#1e3a8a;font-size:11px;font-weight:700;">💰 SONG BUDGET — AUTO-CALCULATED BY GAME. You cannot manually set production costs.</div><div style="margin-top:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">${budgetInputs}</div><div style="margin-top:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">${[['quality','Song Quality'],['musicQuality','Music Quality'],['lyricsQuality','Lyrics'],['choreography','Choreography']].map(([k,l])=>`<label style="font-size:10px;color:#475569;">${l}<input type="number" min="0" max="100" data-song-score="${k}" value="${songNum(song[k],70)}" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:7px;border:1px solid #cbd5e1;border-radius:7px;"></label>`).join('')}</div><label style="display:block;font-size:10px;color:#475569;margin-top:8px;">Song Promotion / Push <input type="number" min="0" max="100" data-song-score="promotion" value="${songNum(song.promotion,50)}" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:7px;border:1px solid #cbd5e1;border-radius:7px;"></label><div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">${released?`<span class="wd-btn" style="background:#ecfdf5;border-color:#86efac;color:#166534;">Response: ${escapeHtml(song.response||'—')} · ${Math.round(song.responseScore)}/100</span><span class="wd-btn" style="background:#fdf2f8;border-color:#f9a8d4;color:#9d174d;">Song Collection: ₹${song.collection.toFixed(2)} Cr</span>`:`<button type="button" class="wd-btn" data-song-save="${index}" style="background:#2563eb;border-color:#2563eb;">SAVE SONG</button><button type="button" class="wd-btn" data-song-release="${index}" style="background:#db2777;border-color:#db2777;">RELEASE SONG</button>`}</div></div>`;
     }
     function syncSongFromCard(song,card){
       song.name=card.querySelector('[data-song-name]')?.value.trim()||'';song.type=card.querySelector('[data-song-type]')?.value||'Other';song.shootingLocation=card.querySelector('[data-song-location]')?.value.trim()||'India';
@@ -11108,19 +11162,14 @@ initializeNewFeatureUI();
       song.castIds=[...card.querySelectorAll('[data-song-cast]:checked')].map(x=>x.getAttribute('data-song-cast'));
       song.dubbingLanguages=[...card.querySelectorAll('[data-song-dub]:checked')].map(x=>x.getAttribute('data-song-dub'));
       song.releaseCountries=[...card.querySelectorAll('[data-song-country]:checked')].map(x=>x.getAttribute('data-song-country'));
-      card.querySelectorAll('[data-song-budget]').forEach(x=>song.budget[x.getAttribute('data-song-budget')]=Math.max(0,songNum(x.value,0)));
       card.querySelectorAll('[data-song-score]').forEach(x=>song[x.getAttribute('data-song-score')]=songClamp(songNum(x.value,70)));
+      calculateSongBudget(song, getActiveMovie());
     }
-    function renderSongs(){const m=getActiveMovie();if(!m)return;ensureSongState(m);document.getElementById('songMovieTitle').innerText=m.name;const host=document.getElementById('songReleaseCard');host.innerHTML=`<div style="padding:12px;background:#fdf2f8;border-radius:10px;margin-bottom:10px;color:#9d174d;font-size:12px;">Each song is independent. Song Collection and Song Budget are separate from Movie Collection and Movie Budget. A country not selected below always produces ₹0 song collection in that country.</div>${m.songs.map((s,i)=>songCardHtml(s,i,m)).join('')||'<div class="mkt-category-card">No songs configured for this movie. The existing movie song-count choice remains supported; save the movie and reopen this manager to create its song entities.</div>'}`;
-      host.querySelectorAll('[data-song-card]').forEach(card=>{const i=Number(card.getAttribute('data-song-card'));card.querySelectorAll('[data-song-lang]').forEach(btn=>btn.onclick=()=>{m.songs[i].originalLanguage=btn.getAttribute('data-song-lang');renderSongs();});card.querySelector('[data-song-save]')?.addEventListener('click',()=>{syncSongFromCard(m.songs[i],card);if(!m.songs[i].name){alert('Please enter a separate song name.');return;}ensureSongSingerFee(m.songs[i]);calculateBuzz(m);renderSongs();});card.querySelector('[data-song-release]')?.addEventListener('click',()=>{syncSongFromCard(m.songs[i],card);releaseSong(m,i);});});
+    function renderSongs(){const m=getActiveMovie();if(!m)return;ensureSongState(m);m.songs.forEach(s=>{if(!s.released)calculateSongBudget(s,m);});document.getElementById('songMovieTitle').innerText=m.name;const host=document.getElementById('songReleaseCard');host.innerHTML=`<div style="padding:12px;background:#fdf2f8;border-radius:10px;margin-bottom:10px;color:#9d174d;font-size:12px;">Each song is independent. Song Collection and Song Budget are separate from Movie Collection and Movie Budget. A country not selected below always produces ₹0 song collection in that country.</div>${m.songs.map((s,i)=>songCardHtml(s,i,m)).join('')||'<div class="mkt-category-card">No songs configured for this movie. The existing movie song-count choice remains supported; save the movie and reopen this manager to create its song entities.</div>'}`;
+      host.querySelectorAll('[data-song-card]').forEach(card=>{const i=Number(card.getAttribute('data-song-card'));card.querySelectorAll('[data-song-lang]').forEach(btn=>btn.onclick=()=>{m.songs[i].originalLanguage=btn.getAttribute('data-song-lang');renderSongs();});card.querySelectorAll('[data-song-singer],[data-song-type],[data-song-score]').forEach(el=>el.addEventListener('change',()=>{syncSongFromCard(m.songs[i],card);renderSongs();}));card.querySelector('[data-song-save]')?.addEventListener('click',()=>{syncSongFromCard(m.songs[i],card);if(!m.songs[i].name){alert('Please enter a separate song name.');return;}calculateSongBudget(m.songs[i],m);calculateBuzz(m);renderSongs();});card.querySelector('[data-song-release]')?.addEventListener('click',()=>{syncSongFromCard(m.songs[i],card);releaseSong(m,i);});});
     }
-    function ensureSongSingerFee(song){
-      if(!song.budget||typeof song.budget!=='object')song.budget={};
-      const calculated=song.singers.reduce((sum,id)=>{const t=singerById(id);return sum+musicFeeValue(t);},0);
-      song.budget.singerFee=songRound(calculated);
-      return song.budget.singerFee;
-    }
-    function releaseSong(m,index){const song=m.songs[index];if(!song)return;if(!song.name){alert('Please enter a separate song name.');return;}if(!song.releaseCountries.length){alert('Select at least one country for the song release. Unselected countries remain ₹0 collection.');return;}ensureSongSingerFee(song);const total=songBudgetTotal(song);if(gameState.cashOnHand<total){alert(`Insufficient cash to produce/release this song.\nSong Budget: ₹${total.toFixed(2)} Cr\nAvailable Cash: ₹${songNum(gameState.cashOnHand,0).toFixed(2)} Cr`);return;}gameState.cashOnHand-=total;calculateSongResponse(song,m);calculateSongBuzz(song,m);calculateSongCollection(song,m);song.released=true;song.releasedAt={week:gameState.currentWeek,year:gameState.currentYear};song.musicBuzzContribution=song.buzz;song.collectionByCountry=Object.fromEntries(SONG_COUNTRIES.map(([c])=>[c,Math.max(0,songNum(song.collectionByCountry[c],0))]));song.collection=songRound(Object.values(song.collectionByCountry).reduce((a,b)=>a+Math.max(0,songNum(b,0)),0));calculateBuzz(m);renderSongs();updateDashboardUI();alert(`Song released: ${song.name}\nResponse: ${song.response} (${song.responseScore}/100)\nSong Budget: ₹${total.toFixed(2)} Cr\nSong Collection: ₹${song.collection.toFixed(2)} Cr\nMusic Buzz Contribution: ${song.buzz}/100\nMovie collection was not changed.`);}
+    function ensureSongSingerFee(song){if(!song)return 0;calculateSongBudget(song,getActiveMovie());return song.budget.singerFee;}
+    function releaseSong(m,index){const song=m.songs[index];if(!song)return;if(!song.name){alert('Please enter a separate song name.');return;}if(!song.releaseCountries.length){alert('Select at least one country for the song release. Unselected countries remain ₹0 collection.');return;}calculateSongBudget(song,m);const total=songBudgetTotal(song);if(gameState.cashOnHand<total){alert(`Insufficient cash to produce/release this song.\nSong Budget: ₹${total.toFixed(2)} Cr\nAvailable Cash: ₹${songNum(gameState.cashOnHand,0).toFixed(2)} Cr`);return;}gameState.cashOnHand-=total;calculateSongResponse(song,m);calculateSongBuzz(song,m);calculateSongCollection(song,m);song.released=true;song.releasedAt={week:gameState.currentWeek,year:gameState.currentYear};song.musicBuzzContribution=song.buzz;song.collectionByCountry=Object.fromEntries(SONG_COUNTRIES.map(([c])=>[c,Math.max(0,songNum(song.collectionByCountry[c],0))]));song.collection=songRound(Object.values(song.collectionByCountry).reduce((a,b)=>a+Math.max(0,songNum(b,0)),0));calculateBuzz(m);renderSongs();updateDashboardUI();alert(`Song released: ${song.name}\nResponse: ${song.response} (${song.responseScore}/100)\nSong Budget: ₹${total.toFixed(2)} Cr\nSong Collection: ₹${song.collection.toFixed(2)} Cr\nMusic Buzz Contribution: ${song.buzz}/100\nMovie collection was not changed.`);}
     function songMigration(state){if(!state)return state;(state.movies||[]).forEach(m=>{ensureSongState(m);if(!m.released)calculateBuzz(m);});(state.completedMovies||[]).forEach(m=>ensureSongState(m));return state;}
 
     // Public pre-release buzz refresh hooks. These wrappers preserve the old
