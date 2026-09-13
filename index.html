@@ -5427,18 +5427,23 @@ function territoryReleaseReach(movie, territory) {
     return 0.68 + 0.62 * (1 - Math.exp(-budget / 42));
 }
 function territoryCompetitionMultiplier(movie, territory) {
-    const base = typeof computeCompetitionMultiplier === 'function' ? Number(computeCompetitionMultiplier(movie) || 1) : 1;
+    if (!movie || !getReleasedTerritories(movie).includes(territory)) return 1;
+    const mAbs = movie.releaseDate ? Number(movie.releaseDate.year) * 52 + Number(movie.releaseDate.week) : Number(gameState.currentYear || 0) * 52 + Number(gameState.currentWeek || 1);
     let penalty = 0;
-    const ownGenres = movie && movie.genres || [];
-    const rivals = (gameState.movies || []).filter(r => r && r.id !== movie.id && r.released && !r.marketRunComplete && getReleasedTerritories(r).includes(territory));
-    rivals.forEach(rival => {
+    const ownGenres = movie.genres || [];
+    (gameState.movies || []).forEach(rival => {
+        if (!rival || rival.id === movie.id || !rival.released || rival.marketRunComplete || !rival.releaseDate) return;
+        if (!getReleasedTerritories(rival).includes(territory)) return;
+        const rAbs = Number(rival.releaseDate.year) * 52 + Number(rival.releaseDate.week);
+        const gap = Math.abs(mAbs - rAbs);
+        if (gap > 2) return;
+        const proximity = Math.max(0, 1 - gap / 3);
         const shared = ownGenres.filter(g => (rival.genres || []).includes(g)).length;
-        const overlap = ownGenres.length ? shared / ownGenres.length : 0;
-        const star = Number(rival.cast && ['hero','heroine'].flatMap(x=>rival.cast[x]||[]).reduce((s,t)=>s+Number(t.starPower||0),0) || 0) / Math.max(1, territoryLeadCast(rival).length) / 100;
-        const proximity = rival.releaseDate && movie.releaseDate ? Math.max(0, 1 - Math.abs((rival.releaseDate.year*52+rival.releaseDate.week)-(movie.releaseDate.year*52+movie.releaseDate.week))/3) : 0.3;
-        penalty += proximity * (0.045 * overlap + 0.025 * star);
+        const genreOverlap = ownGenres.length ? shared / ownGenres.length : 0;
+        const rivalPull = Math.max(20, Math.min(100, Number(movieOpeningStarPull(rival) || 50))) / 100;
+        penalty += proximity * (0.035 * genreOverlap + 0.018 * rivalPull);
     });
-    return Math.max(0.55, Math.min(1.05, base * (1 - Math.min(0.25, penalty))));
+    return Math.max(0.78, Math.min(1.02, 1 - Math.min(0.22, penalty)));
 }
 function territoryCalendarFactor(movie, territory, weekNumber) {
     const meta = territoryCountryProfile(territory);
@@ -5455,68 +5460,167 @@ function territoryControlledVariance(movie, territory, weekNumber) {
     const unit = ((h >>> 0) % 10000) / 10000;
     return 0.94 + unit * 0.12;
 }
-function territoryDemandScore(movie, territory, weekNumber) {
-    const m = movie || {};
-    // Country Release is a strict access gate for movie collection. Only a
-    // canonically selected release territory may receive a demand score.
-    // Unselected territories are excluded before any collection factors run.
-    if (!getReleasedTerritories(m).includes(territory)) return 0;
+function boxOfficeWomScore(movie) {
+    if (!movie) return 50;
+    const raw = movie.wordOfMouthScore != null ? Number(movie.wordOfMouthScore) :
+        (movie.wordOfMouth === 'Outstanding' ? 95 : movie.wordOfMouth === 'Positive' ? 80 : movie.wordOfMouth === 'Mixed' ? 62 : 35);
+    return Math.max(0, Math.min(100, Number.isFinite(raw) ? raw : 50));
+}
+function boxOfficeHypeScore(movie) {
+    const raw = Number(movie && movie.hypeScore);
+    return Math.max(20, Math.min(100, Number.isFinite(raw) ? raw : 50));
+}
+function boxOfficeMarketingScore(movie) {
+    const spend = Math.max(0, Number(movie && movie.marketingTotal) || 0);
+    const level = movie && movie.marketingConfirmedLevel;
+    const levelBonus = level === 'worldwide' ? 14 : level === 'country' ? 8 : level === 'small' ? 4 : 0;
+    // One awareness curve only. Spend helps strongly at low levels and then
+    // approaches a ceiling instead of being multiplied in several places.
+    return Math.max(25, Math.min(100, 28 + 62 * (1 - Math.exp(-spend / 35)) + levelBonus));
+}
+function boxOfficeFranchiseSignal(movie, territory) {
+    if (!movie || !(movie.franchiseId || movie.franchiseName)) return 1;
+    return Math.max(1, Math.min(1.20, Number(territoryFranchiseFactor(movie, territory) || 1)));
+}
+function boxOfficeGenreSignal(movie) {
+    const raw = typeof getGenreTrendMultiplier === 'function' ? Number(getGenreTrendMultiplier((movie && movie.genres) || []) || 1) : 1;
+    return Math.max(0.90, Math.min(1.12, 1 + (raw - 1) * 0.55));
+}
+function boxOfficeFestivalSignal(movie, weekNumber) {
+    if (!movie) return 1;
+    const releaseWeek = movie.releaseDate ? Number(movie.releaseDate.week) : Number(gameState.currentWeek || 1);
+    const targetWeek = ((releaseWeek + Math.max(0, weekNumber - 1) - 1) % 52) + 1;
+    const raw = typeof getFestivalMultiplier === 'function' ? Number(getFestivalMultiplier(targetWeek, movie.genres || [], movie) || 1) : 1;
+    return Math.max(0.94, Math.min(1.16, 1 + (raw - 1) * 0.60));
+}
+function boxOfficeReconcileTerritoryGrosses(breakdown, total) {
+    const entries = Object.keys(breakdown || {}).map(t => ({t, raw:Math.max(0, Number(breakdown[t].gross || 0))}));
+    const targetCents = Math.max(0, Math.round(Number(total || 0) * 100));
+    const cents = entries.map(x => {
+        const rawCents = x.raw * 100;
+        const floor = Math.floor(rawCents);
+        return {t:x.t, gross:floor / 100, remainder:rawCents-floor};
+    });
+    let used = cents.reduce((sum,x)=>sum+Math.round(x.gross*100),0);
+    let remaining = Math.max(0,targetCents-used);
+    cents.slice().sort((a,b)=>b.remainder-a.remainder).forEach(x=>{
+        if(remaining>0){x.gross=Number((x.gross+0.01).toFixed(2));remaining--;}
+    });
+    if(remaining>0&&cents.length)cents[cents.length-1].gross=Number((cents[cents.length-1].gross+remaining/100).toFixed(2));
+    cents.forEach(x=>{if(breakdown[x.t])breakdown[x.t].gross=x.gross;});
+    return breakdown;
+}
+function boxOfficeTicketPriceINR(territory) {
+    // INR-equivalent average realized ticket price. These are economic tiers,
+    // not collection percentages, and are deliberately bounded by territory.
+    const prices = {
+        'India':190,'USA':900,'China':300,'Japan':650,'South Korea':600,
+        'United Kingdom':800,'Germany':720,'France':720,'Canada':850,'Australia':820,
+        'Brazil':260,'Mexico':240,'Russia':220,'Spain':650,'Italy':650,
+        'Indonesia':150,'Turkey':210,'Thailand':190,'UAE':500,'Malaysia':170
+    };
+    return Math.max(120, Math.min(1000, Number(prices[territory] || 220)));
+}
+function boxOfficeSeatsPerScreen(territory) {
     const meta = territoryCountryProfile(territory);
-    if (!meta) return 0.15;
-
-    const industry = territoryIndustryKey(m.industry);
-    const industryFactor = Number(meta.industryAffinity && meta.industryAffinity[industry] || 1);
-    const castPower = territoryCastMarketPower(m, territory);
-    const directorWriterFactor = territoryDirectorWriterFactor(m, territory);
-    const critics = Math.max(0, Math.min(10, Number(m.criticsRating || 6)));
-    const audience = Math.max(0, Math.min(10, Number(m.audienceRating || 6)));
-    const reviewFactor = 0.55 + ((critics + audience) / 20) * 0.45;
-    const wom = Number(m.wordOfMouthScore != null ? m.wordOfMouthScore : (m.wordOfMouth === 'Outstanding' ? 95 : m.wordOfMouth === 'Positive' ? 80 : m.wordOfMouth === 'Mixed' ? 62 : 35));
-    const womFactor = 0.65 + (Math.max(0, Math.min(100,wom))/100) * 0.35;
-    const marketSizeFactor = 0.72 + Math.log10(Math.max(10, Number(meta.marketSize || 30))) * 0.30;
-    const languageFactor = territoryLanguageMatch(m, territory);
-    const genreFactor = territoryGenreInterest(m, territory);
-    const franchiseFactor = territoryFranchiseFactor(m, territory);
-    const releaseReach = territoryReleaseReach(m, territory);
-    const marketingReach = 0.85 + Math.min(0.30, Math.log10(1 + Math.max(0, Number(m.marketingTotal || 0))) * 0.035);
-    const competition = territoryCompetitionMultiplier(m, territory);
-    const calendar = territoryCalendarFactor(m, territory, weekNumber);
-    const internationalEvent = Number(m.industryEventInternationalBonus || 1);
-    const variance = territoryControlledVariance(m, territory, weekNumber);
-
-    // Cast market power is intentionally one of the strongest terms. This is
-    // what makes the same script behave differently when its stars change.
-    const score =
-        Math.pow(Math.max(0.25, marketSizeFactor), 0.72) *
-        Math.pow(Math.max(0.40, industryFactor), 0.90) *
-        Math.pow(Math.max(0.35, castPower), 1.48) *
-        Math.pow(Math.max(0.55, directorWriterFactor), 0.46) *
-        Math.pow(Math.max(0.40, languageFactor), 0.92) *
-        Math.pow(Math.max(0.55, genreFactor), 0.68) *
-        Math.pow(Math.max(0.55, franchiseFactor), 0.68) *
-        Math.pow(Math.max(0.45, releaseReach), 0.72) *
-        Math.pow(Math.max(0.50, marketingReach), 0.36) *
-        Math.pow(Math.max(0.45, reviewFactor), 0.64) *
-        Math.pow(Math.max(0.45, womFactor), 0.74) *
-        Math.pow(Math.max(0.55, competition), 0.80) *
-        Math.pow(Math.max(0.70, calendar), 0.50) *
-        Math.max(0.85, Math.min(1.15, internationalEvent)) * variance;
-
-    return Math.max(0.08, score);
+    const market = Number(meta && meta.marketSize || 30);
+    return Math.max(160, Math.min(300, Math.round(175 + Math.sqrt(Math.max(1, market)) * 6.0)));
+}
+function boxOfficeShowsPerDay(demand, weekNumber) {
+    const base = weekNumber <= 1 ? 4.4 : 3.6;
+    return Math.max(2.4, Math.min(6.2, base + (Math.max(0.55, Math.min(1.45, demand)) - 0.55) * 2.0));
+}
+function boxOfficeReleaseReachFactor(movie, territory) {
+    const budget = Math.max(0, Number(movie && movie.releaseBudgets && movie.releaseBudgets[territory]) || Number(territoryReleaseBudget(movie, territory)) || 0);
+    // Release spend controls physical reach with strong early gains and
+    // diminishing returns. A selected territory with no budget still has a
+    // small release footprint, while a well-funded wide release can approach
+    // the territory's full base-screen ceiling.
+    return Math.max(0.15, Math.min(1, 0.18 + 0.86 * (1 - Math.exp(-budget / 35))));
+}
+function boxOfficeTerritoryOpeningDemand(movie, territory) {
+    const meta = territoryCountryProfile(territory);
+    if (!meta || !getReleasedTerritories(movie).includes(territory)) return 0;
+    const star = Number(movieOpeningStarPull(movie) || 50);
+    const territoryStar = Number(territoryCastMarketPower(movie, territory) || 0.55);
+    const directorWriter = Number(territoryDirectorWriterFactor(movie, territory) || 0.88);
+    const qualityExpectation = Math.max(0.70, Math.min(1.18, 0.82 + Number(moviePerformanceQuality(movie) || 55) / 100 * 0.36));
+    const hype = 0.72 + boxOfficeHypeScore(movie) / 100 * 0.42;
+    const marketing = 0.78 + boxOfficeMarketingScore(movie) / 100 * 0.38;
+    const language = Math.max(0.40, Math.min(1.30, Number(territoryLanguageMatch(movie, territory) || 0.40)));
+    const genre = Math.max(0.90, Math.min(1.14, Number(territoryGenreInterest(movie, territory) || 1)));
+    const franchise = boxOfficeFranchiseSignal(movie, territory);
+    const calendar = territoryCalendarFactor(movie, territory, 1);
+    const festival = boxOfficeFestivalSignal(movie, 1);
+    const industry = Number(meta.industryAffinity && meta.industryAffinity[territoryIndustryKey(movie.industry)] || 1);
+    const starSignal = 0.62 + (star / 100) * 0.72;
+    const territoryStarSignal = Math.max(0.78, Math.min(1.24, 0.90 + (territoryStar - 0.55) * 0.16));
+    const talentSignal = Math.max(0.88, Math.min(1.12, 0.88 + (directorWriter - 0.80) * 0.38));
+    const marketSignal = 0.88 + Math.log10(Math.max(10, Number(meta.marketSize || 30))) * 0.035;
+    // Weighted geometric blending keeps each input relevant without letting
+    // a single 1.3–1.5 multiplier explode the result.
+    const demand = Math.pow(starSignal,0.30) *
+        Math.pow(territoryStarSignal,0.16) *
+        Math.pow(hype,0.12) *
+        Math.pow(marketing,0.10) *
+        Math.pow(qualityExpectation,0.08) *
+        Math.pow(talentSignal,0.06) *
+        Math.pow(language,0.07) *
+        Math.pow(genre,0.03) *
+        Math.pow(franchise,0.03) *
+        Math.pow(Math.max(0.90,Math.min(1.10,industry)),0.02) *
+        Math.pow(Math.max(0.90,Math.min(1.15,calendar)),0.01) *
+        Math.pow(festival,0.03) *
+        Math.pow(Math.max(0.80,Math.min(1.12,marketSignal)),0.02);
+    return Math.max(0.52, Math.min(1.65, demand));
+}
+function boxOfficeRunDemandDecay(weekNumber, audienceRating, womScore) {
+    if (weekNumber <= 1) return 1;
+    const qualityHold = Math.max(0, Math.min(1, (audienceRating - 4) / 6));
+    const womHold = Math.max(0, Math.min(1, (womScore - 30) / 70));
+    const hold = 0.52 + qualityHold * 0.25 + womHold * 0.23;
+    // Smooth long-tail curve rather than a fixed rating bucket/exponential.
+    // Exceptional audience response slows the decline; weak response does not.
+    const t = weekNumber - 1;
+    const base = 1 / (1 + 0.22 * Math.pow(t, 1.12));
+    return Math.max(0.12, Math.min(1, base * (0.72 + hold * 0.34)));
+}
+function boxOfficeTerritoryDemand(movie, territory, weekNumber) {
+    if (!movie || !getReleasedTerritories(movie).includes(territory)) return 0;
+    if (weekNumber <= 1) return boxOfficeTerritoryOpeningDemand(movie, territory);
+    const base = boxOfficeTerritoryOpeningDemand(movie, territory);
+    const audience = Math.max(1, Math.min(10, Number(movie.audienceRating || 6)));
+    const wom = boxOfficeWomScore(movie);
+    const audienceSignal = 0.45 + audience / 10 * 0.55;
+    // WOM has one primary post-release retention path. It is deliberately
+    // bounded but strong enough to separate genuine legs from front-loaded
+    // openings. This score is then reused for territory capacity/share.
+    const womSignal = 0.55 + wom / 100 * 0.45;
+    const genre = boxOfficeGenreSignal(movie);
+    const calendar = territoryCalendarFactor(movie, territory, weekNumber);
+    const festival = boxOfficeFestivalSignal(movie, weekNumber);
+    const runDecay = boxOfficeRunDemandDecay(weekNumber, audience * 10, wom);
+    return Math.max(0.18, Math.min(1.80, base * audienceSignal * womSignal * genre * calendar * festival * runDecay));
+}
+function territoryDemandScore(movie, territory, weekNumber) {
+    // Public demand score: relative territory demand only. It is never a
+    // direct worldwide revenue multiplier and it respects the release gate.
+    return boxOfficeTerritoryDemand(movie, territory, weekNumber);
 }
 function createTerritoryRecord() {
     return { opening:0, dailyCollections:[], weekly:[], screens:[], occupancy:[], competition:1, wom:null, releaseCost:0, releaseROI:0, finalGross:0, released:true };
 }
 function initializeTerritoryBoxOffice(movie) {
-    if (!movie || movie.territoryTrackingVersion === TERRITORY_BOX_OFFICE_VERSION) return;
+    if (!movie) return;
     const territories = getReleasedTerritories(movie);
     if (!territories.length) return;
-    movie.territoryTrackingVersion = TERRITORY_BOX_OFFICE_VERSION;
-    movie.territoryBoxOffice = {};
+    if (movie.territoryTrackingVersion !== TERRITORY_BOX_OFFICE_VERSION || !movie.territoryBoxOffice) {
+        movie.territoryTrackingVersion = TERRITORY_BOX_OFFICE_VERSION;
+        movie.territoryBoxOffice = {};
+    }
     territories.forEach(t => {
-        const rec = createTerritoryRecord();
-        rec.releaseCost = territoryReleaseBudget(movie, t);
-        movie.territoryBoxOffice[t] = rec;
+        if (!movie.territoryBoxOffice[t]) movie.territoryBoxOffice[t] = createTerritoryRecord();
+        movie.territoryBoxOffice[t].releaseCost = territoryReleaseBudget(movie, t);
     });
 }
 function territoryAllocationIntegrityCheck(territories, scoreEntries, grossEntries, total, tolerance = 0.01) {
@@ -5534,7 +5638,6 @@ function territoryAllocationIntegrityCheck(territories, scoreEntries, grossEntri
     const grossSum = Number(grossEntries.reduce((s,x)=>s + Number(x.gross || 0),0).toFixed(2));
     return { ok: problems.length === 0 && Math.abs(grossSum - Number(total || 0)) < 0.01, problems, grossSum };
 }
-
 function allocateTerritoryWeeklyResult(movie, weekNumber, totalCollection) {
     if (!movie || movie.territoryTrackingVersion !== TERRITORY_BOX_OFFICE_VERSION) return;
     const territories = getReleasedTerritories(movie);
@@ -5546,89 +5649,55 @@ function allocateTerritoryWeeklyResult(movie, weekNumber, totalCollection) {
     });
 
     const total = Math.max(0, Number(totalCollection || 0));
-
-    // Calculate each territory score exactly once. Nothing later in the
-    // allocator is allowed to replace a territory score with a shared value.
+    const precomputed = movie._boxOfficeWeeklyBreakdown && movie._boxOfficeWeeklyBreakdown.week === weekNumber ? movie._boxOfficeWeeklyBreakdown.territories : null;
     const scoreEntries = territories.map(t => {
-        const demandScore = Math.max(0.0001, Number(territoryDemandScore(movie, t, weekNumber) || 0));
-        const wom = Number(movie.wordOfMouthScore != null ? movie.wordOfMouthScore : (movie.wordOfMouth === 'Outstanding' ? 95 : movie.wordOfMouth === 'Positive' ? 80 : movie.wordOfMouth === 'Mixed' ? 62 : 35));
-        const competition = territoryCompetitionMultiplier(movie, t);
-        const releaseReach = territoryReleaseReach(movie, t);
-        const screens = Math.max(20, Math.round(TERRITORY_META[t].baseScreens * Math.min(2.20, releaseReach) * (0.58 + Math.min(0.82, demandScore * 0.16))));
-        const occupancy = Math.max(5, Math.min(98, Math.round(18 + Math.min(48, demandScore * 15) + (wom/100)*22 + (Number(movie.audienceRating||6)/10)*12 - (1-competition)*35)));
-        // Occupancy represents the utilization generated by this same demand
-        // model. It affects distribution through a bounded factor only, so it
-        // cannot manufacture extra worldwide revenue.
-        const occupancyFactor = 0.78 + (occupancy / 100) * 0.44;
-        // WOM helps a territory retain audience, but is deliberately bounded
-        // because demandScore already contains WOM/review information.
-        const womFactor = 0.92 + (Math.max(0,Math.min(100,wom))/100) * 0.16;
-        const allocationScore = demandScore * occupancyFactor * womFactor;
-        return {t, score:Math.max(0.0001, allocationScore), demandScore, occupancy, screens, wom, competition};
+        const pre = precomputed && precomputed[t];
+        const score = pre ? Number(pre.demandScore || 0) : Math.max(0.0001, Number(territoryDemandScore(movie, t, weekNumber) || 0));
+        return {t, score:Math.max(0.0001,score), demandScore:score, occupancy:pre ? Number(pre.occupancy || 0) : 0, screens:pre ? Number(pre.screens || 0) : 0, wom:boxOfficeWomScore(movie), competition:pre ? Number(pre.competition || 1) : 1};
     });
-    const totalScore = scoreEntries.reduce((s,x)=>s + x.score, 0) || 1;
-
-    // Largest-remainder allocation keeps the exact authoritative worldwide
-    // total while preserving the ordering implied by the independent demand
-    // scores. The final territory no longer absorbs every rounding residual.
-    const raw = scoreEntries.map(x => ({
-        t:x.t,
-        rawGross: total * x.score / totalScore
-    }));
-    const cents = raw.map(x => ({
-        t:x.t,
-        gross:Math.floor(x.rawGross * 100) / 100,
-        remainder:x.rawGross * 100 - Math.floor(x.rawGross * 100)
-    }));
-    let usedCents = cents.reduce((s,x)=>s + Math.round(x.gross * 100),0);
-    const targetCents = Math.round(total * 100);
-    let remainingCents = Math.max(0, targetCents - usedCents);
-    cents.slice().sort((a,b)=>b.remainder-a.remainder).forEach(x => {
-        if (remainingCents > 0) {
-            x.gross = Number((x.gross + 0.01).toFixed(2));
-            remainingCents--;
+    let grossEntries;
+    if (precomputed) {
+        grossEntries = territories.map(t => ({t, gross:Number((precomputed[t] && precomputed[t].gross || 0).toFixed(2))}));
+        const preSum = Number(grossEntries.reduce((s,x)=>s+x.gross,0).toFixed(2));
+        if (Math.abs(preSum-total) >= 0.01 && territories.length) {
+            const target = territories.slice().sort((a,b)=>(grossEntries.find(x=>x.t===b).gross||0)-(grossEntries.find(x=>x.t===a).gross||0))[0];
+            const item = grossEntries.find(x=>x.t===target);
+            item.gross = Number((item.gross + total - preSum).toFixed(2));
         }
-    });
-    // Defensive reconciliation for floating-point edge cases.
-    if (remainingCents > 0 && cents.length) {
-        cents[cents.length - 1].gross = Number((cents[cents.length - 1].gross + remainingCents / 100).toFixed(2));
-        remainingCents = 0;
+    } else {
+        // Compatibility path for old/historical records: allocate only the
+        // already-known worldwide total; never recalculate that total.
+        const raw = scoreEntries.map(x=>({t:x.t, rawGross:total*x.score/(scoreEntries.reduce((s,e)=>s+e.score,0)||1)}));
+        const cents = raw.map(x=>({t:x.t,gross:Math.floor(x.rawGross*100)/100,remainder:x.rawGross*100-Math.floor(x.rawGross*100)}));
+        let used=cents.reduce((s,x)=>s+Math.round(x.gross*100),0), remain=Math.max(0,Math.round(total*100)-used);
+        cents.slice().sort((a,b)=>b.remainder-a.remainder).forEach(x=>{if(remain>0){x.gross=Number((x.gross+0.01).toFixed(2));remain--;}});
+        if(remain>0&&cents.length)cents[cents.length-1].gross=Number((cents[cents.length-1].gross+remain/100).toFixed(2));
+        grossEntries=territories.map(t=>{const x=cents.find(v=>v.t===t);return {t,gross:Number((x?x.gross:0).toFixed(2))};});
     }
+    const integrity=territoryAllocationIntegrityCheck(territories,scoreEntries,grossEntries,total);
+    if(!integrity.ok)console.error('[Territory Allocation Integrity]',movie.name||'Movie',weekNumber,integrity);
+    movie._lastTerritoryAllocationIntegrity={week:weekNumber,ok:integrity.ok,grossSum:integrity.grossSum,problems:integrity.problems};
 
-    const grossEntries = territories.map(t => {
-        const found = cents.find(x=>x.t===t);
-        return {t, gross:Number((found ? found.gross : 0).toFixed(2))};
-    });
-
-    const integrity = territoryAllocationIntegrityCheck(territories, scoreEntries, grossEntries, total);
-    if (!integrity.ok) console.error('[Territory Allocation Integrity]', movie.name || 'Movie', weekNumber, integrity);
-    movie._lastTerritoryAllocationIntegrity = {week:weekNumber, ok:integrity.ok, grossSum:integrity.grossSum, problems:integrity.problems};
-
-    grossEntries.forEach(entry => {
-        const rec = movie.territoryBoxOffice[entry.t];
-        const entryScore = scoreEntries.find(x=>x.t===entry.t);
-        const score = entryScore ? entryScore.score : 0;
-        const gross = entry.gross;
-        const screens = entryScore ? entryScore.screens : 20;
-        const occupancy = entryScore ? entryScore.occupancy : 5;
-        const wom = entryScore ? entryScore.wom : 0;
-        const competition = entryScore ? entryScore.competition : 1;
-        const dailyPattern = [0.08,0.10,0.12,0.13,0.15,0.21,0.21];
-        const daily = dailyPattern.map(x => Number((gross * x).toFixed(2)));
-        const dailyDiff = Number((gross - daily.reduce((a,b)=>a+b,0)).toFixed(2));
-        daily[daily.length-1] = Number((daily[daily.length-1] + dailyDiff).toFixed(2));
-        const weekRecord = {week:weekNumber,gross:Number(gross.toFixed(2)),demandScore:Number((entryScore ? entryScore.demandScore : score).toFixed(6)),screens,occupancy,competition:Number(competition.toFixed(3)),wom,dailyCollections:daily};
+    grossEntries.forEach(entry=>{
+        const rec=movie.territoryBoxOffice[entry.t];
+        const info=scoreEntries.find(x=>x.t===entry.t)||{};
+        const gross=Number(entry.gross.toFixed(2));
+        const dailyPattern=weekNumber===1?[0.28,0.32,0.40]:[0.08,0.10,0.12,0.13,0.15,0.21,0.21];
+        const daily=dailyPattern.map(x=>Number((gross*x).toFixed(2)));
+        const dailyDiff=Number((gross-daily.reduce((a,b)=>a+b,0)).toFixed(2));
+        daily[daily.length-1]=Number((daily[daily.length-1]+dailyDiff).toFixed(2));
+        const weekRecord={week:weekNumber,gross,demandScore:Number((info.demandScore||info.score||0).toFixed(6)),screens:Math.max(0,Math.round(info.screens||0)),occupancy:Math.max(0,Math.min(100,Math.round(info.occupancy||0))),competition:Number((info.competition||1).toFixed(3)),wom:info.wom==null?boxOfficeWomScore(movie):info.wom,dailyCollections:daily};
         rec.weekly.push(weekRecord);
         rec.dailyCollections.push(...daily);
-        rec.screens.push(screens);
-        rec.occupancy.push(occupancy);
-        rec.competition = competition;
-        rec.wom = wom;
-        rec.finalGross = Number((rec.finalGross + gross).toFixed(2));
-        rec.releaseROI = Number((rec.finalGross - Number(rec.releaseCost || 0)).toFixed(2));
-        if (weekNumber === 1) rec.opening = Number(gross.toFixed(2));
+        rec.screens.push(weekRecord.screens);
+        rec.occupancy.push(weekRecord.occupancy);
+        rec.competition=weekRecord.competition;
+        rec.wom=weekRecord.wom;
+        rec.finalGross=Number((rec.finalGross+gross).toFixed(2));
+        rec.releaseROI=Number((rec.finalGross-Number(rec.releaseCost||0)).toFixed(2));
+        if(weekNumber===1)rec.opening=gross;
     });
-    movie.territoryBoxOfficeTotal = Number(territories.reduce((sum,t)=>sum + Number(movie.territoryBoxOffice[t].finalGross || 0),0).toFixed(2));
+    movie.territoryBoxOfficeTotal=Number(territories.reduce((sum,t)=>sum+Number(movie.territoryBoxOffice[t].finalGross||0),0).toFixed(2));
 }
 function territoryTotalGross(movie) {
     if (!movie || movie.territoryTrackingVersion !== TERRITORY_BOX_OFFICE_VERSION || !movie.territoryBoxOffice) return null;
@@ -6429,9 +6498,7 @@ function simulateOneWeekCore() {
         } else if(m.released && !m.marketRunComplete && m.marketRunWeek < BOX_OFFICE_RUN_WEEKS) {
             m.marketRunWeek++;
             m.boxOfficeWeek = m.marketRunWeek;
-            const competitionMultiplier = computeCompetitionMultiplier(m);
-            let wk = calculateWeeklyCollection(m, m.marketRunWeek);
-            wk = parseFloat((wk * competitionMultiplier).toFixed(2));
+            const wk = calculateWeeklyCollection(m, m.marketRunWeek);
             const pop = calculatePopularity(m, m.marketRunWeek);
             m.weeklyCollections.push(wk);
             m.weeklyPopularity.push(pop);
@@ -7716,156 +7783,150 @@ function calculateInitialPopularity(m) {
     return Math.min(100, Math.max(10, Math.round(pop)));
 }
 
-function calculateOpeningWeekendCollection(m) {
-    // Country Release is the hard access gate. No selected territory means no theatrical collection.
-    if (!m) return 0;
-    const countries = Array.isArray(m.releaseCountries) ? m.releaseCountries : [];
-    if (!countries.length) return 0;
-
-    const baselinePotential = {
-        'USA':120,'China':110,'India':90,'Japan':70,'South Korea':60,'United Kingdom':55,
-        'Germany':50,'France':50,'Canada':45,'Australia':40,'Brazil':40,'Mexico':35,
-        'Russia':35,'Spain':30,'Italy':30,'Indonesia':25,'Turkey':25,'Thailand':20,
-        'UAE':20,'Malaysia':15
-    };
-    let totalPotentialMarket = 0;
-    countries.forEach(c => {
-        const territory = canonicalTerritoryForCountry(c) || c;
-        const access = Math.max(0, Math.min(1.35, Number(territoryLanguageMatch(m, territory) || 0)));
-        const base = Number(baselinePotential[c] || baselinePotential[territory] || 20);
-        // Market size is access potential only; quality/pull determine how much is captured.
-        totalPotentialMarket += base * Math.max(0, Math.min(1, 0.42 + access * 0.30));
-    });
-
-    const starPull = movieOpeningStarPull(m);
-    const quality = moviePerformanceQuality(m);
-    const writer = movieWriterQuality(m);
-    const director = movieDirectorQuality(m);
-    const marketing = Number.isFinite(Number(m.marketingTotal)) ? Math.max(0, Number(m.marketingTotal)) : 0;
-    const marketingScore = Math.max(20, Math.min(100, 38 + Math.log10(1 + marketing) * 22 + (m.marketingConfirmedLevel === 'worldwide' ? 16 : m.marketingConfirmedLevel === 'country' ? 9 : m.marketingConfirmedLevel === 'small' ? 4 : 0)));
-    const hype = Number.isFinite(Number(m.hypeScore)) ? Math.max(20, Math.min(100, Number(m.hypeScore))) : 50;
-    const franchise = (m.franchiseName && String(m.franchiseName).trim() !== '') || m.franchiseId ? 1.08 : 1;
-    const genre = typeof getGenreTrendMultiplier === 'function' ? getGenreTrendMultiplier(m.genres || []) : 1;
-    const releaseWeek = m.releaseDate ? m.releaseDate.week : gameState.currentWeek;
-    const festival = typeof getFestivalMultiplier === 'function' ? getFestivalMultiplier(releaseWeek, m.genres || [], m) : 1;
-    const competition = typeof computeCompetitionMultiplier === 'function' ? computeCompetitionMultiplier(m) : 1;
-
-    // Opening = market access × earned capture. Star pull leads; quality restrains the ceiling.
-    const starFactor = 0.55 + (starPull / 100) * 0.72;
-    const qualityFactor = 0.48 + (quality / 100) * 0.58;
-    const hypeFactor = 0.72 + (hype / 100) * 0.28;
-    const marketingFactor = 0.82 + (marketingScore / 100) * 0.28;
-    const talentAwareness = 0.88 + (writer / 100) * 0.05 + (director / 100) * 0.07;
-    const captureRate = Math.max(0.018, Math.min(0.24, 0.080 * starFactor * qualityFactor * hypeFactor * marketingFactor * talentAwareness));
-    const variance = 0.90 + Math.random() * 0.20;
-    const opening = totalPotentialMarket * captureRate * Math.max(0.85, Math.min(1.18, genre * festival * franchise * competition)) * variance;
-    return parseFloat(Math.max(1.0, opening).toFixed(2));
+const BOX_OFFICE_ENGINE_VERSION = 2;
+function boxOfficeCurrentAbsoluteWeek() {
+    return Number(gameState.currentYear || 0) * 52 + Number(gameState.currentWeek || 1);
 }
-
-function calculateWeeklyCollection(m, weekNumber) {
-    if (weekNumber === 1) return m.openingWeekendCollection;
-
-    const ar = m.audienceRating || 6.0;
-
-    // Original week 2-5 decay curve — unchanged from the 5-week version.
-    function decayForWeek(wk) {
-        let d = 0.5;
-        if (ar >= 8.5) {
-            if (wk === 2) d = 0.90;
-            else if (wk === 3) d = 0.70;
-            else if (wk === 4) d = 0.50;
-            else if (wk === 5) d = 0.30;
-        } else if (ar >= 7.0) {
-            if (wk === 2) d = 0.70;
-            else if (wk === 3) d = 0.45;
-            else if (wk === 4) d = 0.25;
-            else if (wk === 5) d = 0.12;
-        } else if (ar >= 5.5) {
-            if (wk === 2) d = 0.45;
-            else if (wk === 3) d = 0.20;
-            else if (wk === 4) d = 0.08;
-            else if (wk === 5) d = 0.02;
-        } else {
-            if (wk === 2) d = 0.25;
-            else if (wk === 3) d = 0.05;
-            else if (wk === 4) d = 0.01;
-            else if (wk === 5) d = 0.00;
-        }
-        return d;
-    }
-
-    let baseDecay;
-    if (weekNumber <= 5) {
-        baseDecay = decayForWeek(weekNumber);
-    } else {
-        // Extension for weeks 6-10 (the original formula only defined
-        // weeks 2-5): continue the same downward trend rather than
-        // inventing a new curve — each week keeps falling off from where
-        // week 5 left it, at a pace consistent with how steeply that
-        // rating tier was already declining.
-        const continuationFactor = ar >= 8.5 ? 0.65 : ar >= 7.0 ? 0.55 : ar >= 5.5 ? 0.45 : 0.30;
-        baseDecay = decayForWeek(5) * Math.pow(continuationFactor, weekNumber - 5);
-        if (baseDecay < 0.005) baseDecay = 0; // effectively out of theaters
-    }
-
-    let weeklyBase = m.openingWeekendCollection * baseDecay;
-
-    let targetWeek = (m.releaseDate ? m.releaseDate.week : gameState.currentWeek) + weekNumber - 1;
-    if (targetWeek > 52) targetWeek -= 52;
-    let festivalMult = getFestivalMultiplier(targetWeek, m.genres || [], m);
-    let genreMult = getGenreTrendMultiplier(m.genres || []);
-
-    let variance = 0.9 + Math.random() * 0.2;
-    let result = weeklyBase * festivalMult * genreMult * variance;
-    return parseFloat(Math.max(0, result).toFixed(2));
+function boxOfficeMovieReleaseAbsoluteWeek(movie) {
+    if (!movie || !movie.releaseDate) return boxOfficeCurrentAbsoluteWeek();
+    return Number(movie.releaseDate.year || 0) * 52 + Number(movie.releaseDate.week || 1);
 }
-
-/* ---------- BOX-OFFICE COMPETITION (overlapping releases) ---------- */
-// Extends the existing box-office formula rather than replacing it: this
-// returns a multiplier (<=1) applied on top of whatever calculateWeeklyCollection
-// / calculateOpeningWeekendCollection already computed. Built entirely from
-// fields the game already tracks (release week, genres, director star
-// power, marketing spend) — "screen allocation" and "hype" aren't tracked
-// as literal separate numbers in this game, so their effect is folded into
-// this same combined multiplier rather than adding parallel systems for them.
-function computeCompetitionMultiplier(m) {
-    if (!m.releaseDate) return 1;
-    const mAbsWeek = m.releaseDate.year * 52 + m.releaseDate.week;
+function boxOfficeCompetitionMultiplier(movie) {
+    if (!movie || !movie.releaseDate) return 1;
+    const currentAbs = boxOfficeCurrentAbsoluteWeek();
+    const ownRelease = boxOfficeMovieReleaseAbsoluteWeek(movie);
     let totalPenalty = 0;
-
+    const ownTerritories = getReleasedTerritories(movie);
+    const ownGenres = movie.genres || [];
     (gameState.movies || []).forEach(rival => {
-        if (!rival || rival.id === m.id) return;
-        if (!rival.released || rival.marketRunComplete || !rival.releaseDate) return;
-
-        const rAbsWeek = rival.releaseDate.year * 52 + rival.releaseDate.week;
-        const gap = Math.abs(mAbsWeek - rAbsWeek);
-        if (gap > 2) return; // beyond a ~2 week window, treat as no meaningful overlap
-
-        const proximityFactor = 1 - (gap / 3); // 1.0 same week, ~0.33 two weeks apart
-
-        const sharedGenres = (m.genres || []).filter(g => (rival.genres || []).includes(g)).length;
-        const genreOverlapFactor = (m.genres && m.genres.length) ? sharedGenres / m.genres.length : 0;
-
-        const rivalStar = rival.director ? (rival.director.starPower || rival.director.overallRating || 50) : 30;
-        const ownStar = m.director ? (m.director.starPower || m.director.overallRating || 50) : 30;
-        const starPowerFactor = rivalStar > ownStar ? Math.min(1, (rivalStar - ownStar) / 100) : 0;
-
-        const rivalMarketing = rival.marketingTotal || 0;
-        const ownMarketing = m.marketingTotal || 0;
-        const marketingFactor = rivalMarketing > ownMarketing
-            ? Math.min(1, (rivalMarketing - ownMarketing) / (ownMarketing + rivalMarketing + 1))
-            : 0;
-
-        // Weighted blend: genre/audience overlap matters most, then star
-        // power draw, then marketing dominance. Capped per-rival below.
-        const rivalPenalty = proximityFactor * (0.20 * genreOverlapFactor + 0.10 * starPowerFactor + 0.08 * marketingFactor);
-        totalPenalty += rivalPenalty;
+        if (!rival || rival.id === movie.id || !rival.released || rival.marketRunComplete || !rival.releaseDate) return;
+        const rivalRelease = boxOfficeMovieReleaseAbsoluteWeek(rival);
+        const rivalEnd = rivalRelease + BOX_OFFICE_RUN_WEEKS - 1;
+        if (currentAbs < rivalRelease || currentAbs > rivalEnd) return;
+        if (Math.abs(ownRelease - rivalRelease) > 2) return;
+        const rivalTerritories = getReleasedTerritories(rival);
+        const sharedTerritories = ownTerritories.filter(t => rivalTerritories.includes(t)).length;
+        if (!sharedTerritories) return;
+        const territoryOverlap = sharedTerritories / Math.max(1, ownTerritories.length);
+        const sharedGenres = ownGenres.filter(g => (rival.genres || []).includes(g)).length;
+        const genreOverlap = ownGenres.length ? sharedGenres / ownGenres.length : 0;
+        const proximity = Math.max(0, 1 - Math.abs(ownRelease - rivalRelease) / 3);
+        const rivalStar = Math.max(20, Math.min(100, Number(movieOpeningStarPull(rival) || 50))) / 100;
+        const rivalMarketing = Math.max(0, Number(rival.marketingTotal) || 0);
+        const ownMarketing = Math.max(0, Number(movie.marketingTotal) || 0);
+        const marketingGap = rivalMarketing + ownMarketing > 0 ? Math.max(0, rivalMarketing - ownMarketing) / (rivalMarketing + ownMarketing + 1) : 0;
+        // One global headwind only. Territory-level competition is used for
+        // screen/share pressure, but this is the only competition term that
+        // reduces the authoritative worldwide gross.
+        const penalty = proximity * territoryOverlap * (0.095 * genreOverlap + 0.035 * rivalStar + 0.025 * marketingGap);
+        totalPenalty += Math.min(0.13, penalty);
     });
+    return Number((1 - Math.min(0.30, totalPenalty)).toFixed(3));
+}
+function boxOfficeScreenCount(movie, territory, weekNumber, demand) {
+    const meta = territoryCountryProfile(territory);
+    if (!meta) return 0;
+    const reach = boxOfficeReleaseReachFactor(movie, territory);
+    const demandPressure = Math.max(0.28, Math.min(1, Math.sqrt(Math.max(0.20, Math.min(1.80, demand)) / 1.25)));
+    const competition = weekNumber > 1 ? territoryCompetitionMultiplier(movie, territory) : 1;
+    const retention = weekNumber <= 1 ? 1 : Math.max(0.45, Math.min(1.08, 0.58 + demandPressure * 0.42)) * competition;
+    const raw = Number(meta.baseScreens || 0) * reach * (0.34 + 0.66 * demandPressure) * retention;
+    return Math.max(8, Math.min(Number(meta.baseScreens || 8), Math.round(raw)));
+}
+function boxOfficeOccupancy(movie, territory, weekNumber, demand, previousOccupancy) {
+    const demandSignal = Math.max(0, Math.min(1, (Math.max(0.20, Math.min(1.80, demand)) - 0.20) / 1.60));
+    const previousSignal = Math.max(0, Math.min(1, Number(previousOccupancy || 50) / 100));
+    const calendar = Math.max(0.90, Math.min(1.12, territoryCalendarFactor(movie, territory, weekNumber)));
+    // Demand already carries Audience Rating + WOM from Week 2 onward. Do not
+    // feed those variables into occupancy again. Occupancy is simply the
+    // utilization of the capacity produced by the demand model.
+    let occ = 0.16 + 0.64 * Math.sqrt(demandSignal);
+    if (weekNumber > 1) occ += 0.14 * previousSignal;
+    occ *= 0.95 + calendar * 0.05;
+    if (weekNumber === 1) occ += 0.025;
+    return Math.max(0.08, Math.min(0.95, occ));
+}
+function boxOfficeTerritoryGross(movie, territory, weekNumber, demand, globalCompetition) {
+    const meta = territoryCountryProfile(territory);
+    if (!meta || !getReleasedTerritories(movie).includes(territory)) return {gross:0};
+    const previous = movie.territoryBoxOffice && movie.territoryBoxOffice[territory];
+    const previousWeekly = previous && Array.isArray(previous.weekly) && previous.weekly.length ? previous.weekly[previous.weekly.length - 1] : null;
+    const previousOccupancy = previousWeekly ? Number(previousWeekly.occupancy || 50) : 50;
+    const occupancy = boxOfficeOccupancy(movie, territory, weekNumber, demand, previousOccupancy);
+    const screens = boxOfficeScreenCount(movie, territory, weekNumber, demand);
+    const showsPerDay = boxOfficeShowsPerDay(demand, weekNumber);
+    const seats = boxOfficeSeatsPerScreen(territory);
+    const operatingDays = weekNumber === 1 ? 3 : 7;
+    const ticketPrice = boxOfficeTicketPriceINR(territory);
+    const tickets = screens * showsPerDay * seats * operatingDays * occupancy;
+    const gross = tickets * ticketPrice / 10000000 * Math.max(0.70, Math.min(1.02, globalCompetition));
+    return {gross:Math.max(0, gross), demandScore:demand, screens, occupancy:occupancy*100, tickets, ticketPrice, showsPerDay, seats, competition:globalCompetition};
+}
+function calculateOpeningWeekendCollection(m) {
+    // Strict Country Release gate: no selected territory means no theatrical
+    // capacity and therefore exactly zero opening collection.
+    if (!m || !getReleasedTerritories(m).length) return 0;
+    const territories = getReleasedTerritories(m);
+    const competition = boxOfficeCompetitionMultiplier(m);
+    const breakdown = {};
+    let total = 0;
+    territories.forEach(t => {
+        const demand = boxOfficeTerritoryOpeningDemand(m, t);
+        const result = boxOfficeTerritoryGross(m, t, 1, demand, competition);
+        breakdown[t] = result;
+        total += result.gross;
+    });
+    total *= 0.97 + Math.random() * 0.06;
+    const rounded = Number(Math.max(0, total).toFixed(2));
+    boxOfficeReconcileTerritoryGrosses(breakdown, rounded);
+    m._boxOfficeWeeklyBreakdown = {week:1, territories:breakdown, competition};
+    m._boxOfficeDebug = {
+        phase:'opening', marketCapacity:territories.reduce((s,t)=>s + Number(TERRITORY_META[t].baseScreens||0) * boxOfficeSeatsPerScreen(t) * boxOfficeShowsPerDay(boxOfficeTerritoryOpeningDemand(m,t),1) * 3 * boxOfficeTicketPriceINR(t) / 10000000,0),
+        starPull:movieOpeningStarPull(m), hype:boxOfficeHypeScore(m), marketing:boxOfficeMarketingScore(m),
+        qualityExpectation:moviePerformanceQuality(m), releaseReach:territories.reduce((s,t)=>s+boxOfficeReleaseReachFactor(m,t),0)/territories.length,
+        festival:boxOfficeFestivalSignal(m,1), genre:boxOfficeGenreSignal(m), franchise:territories.reduce((s,t)=>s+boxOfficeFranchiseSignal(m,t),0)/territories.length,
+        competition, openingDemand:territories.reduce((s,t)=>s+boxOfficeTerritoryOpeningDemand(m,t),0), openingGross:rounded
+    };
+    return rounded;
+}
+function calculateWeeklyCollection(m, weekNumber) {
+    if (!m || weekNumber < 1) return 0;
+    if (weekNumber === 1) return Number(m.openingWeekendCollection || 0);
+    // Completed/legacy movies keep their stored historical weekly values. The
+    // new engine is activated only when a movie is newly released.
+    if (m._boxOfficeEngineVersion !== BOX_OFFICE_ENGINE_VERSION) {
+        return Number(Array.isArray(m.weeklyCollections) ? (m.weeklyCollections[weekNumber - 1] || 0) : 0);
+    }
+    const territories = getReleasedTerritories(m);
+    if (!territories.length) return 0;
+    const competition = boxOfficeCompetitionMultiplier(m);
+    const breakdown = {};
+    let total = 0;
+    territories.forEach(t => {
+        const demand = boxOfficeTerritoryDemand(m, t, weekNumber);
+        const result = boxOfficeTerritoryGross(m, t, weekNumber, demand, competition);
+        breakdown[t] = result;
+        total += result.gross;
+    });
+    const weeklyVariance = 0.96 + Math.random() * 0.08;
+    total = Number(Math.max(0, total * weeklyVariance).toFixed(2));
+    boxOfficeReconcileTerritoryGrosses(breakdown, total);
+    m._boxOfficeWeeklyBreakdown = {week:weekNumber, territories:breakdown, competition};
+    m._boxOfficeDebug = {
+        phase:'weekly', weekNumber, audienceRating:Number(m.audienceRating||0), WOM:boxOfficeWomScore(m),
+        territoryDemand:territories.reduce((s,t)=>s+boxOfficeTerritoryDemand(m,t,weekNumber),0)/territories.length,
+        availableCapacity:territories.reduce((s,t)=>s+breakdown[t].screens*breakdown[t].showsPerDay*breakdown[t].seats*(weekNumber===1?3:7),0),
+        occupancy:territories.reduce((s,t)=>s+breakdown[t].occupancy,0)/territories.length,
+        tickets:territories.reduce((s,t)=>s+breakdown[t].tickets,0),
+        ticketPrice:territories.reduce((s,t)=>s+breakdown[t].ticketPrice,0)/territories.length,
+        weeklyGross:total, competition, retention:total/Math.max(0.0001,Number(m.openingWeekendCollection||1))
+    };
+    return total;
+}
 
-    // Cap total cannibalization so competition never wipes a movie's
-    // collection to near-zero on its own — it's a headwind, not a wall.
-    const cappedPenalty = Math.min(0.35, totalPenalty);
-    return parseFloat((1 - cappedPenalty).toFixed(3));
+/* ---------- BOX-OFFICE COMPETITION ---------- */
+function computeCompetitionMultiplier(m) {
+    return boxOfficeCompetitionMultiplier(m);
 }
 
 // Simplified domestic/international split, derived from the existing total
@@ -7874,7 +7935,8 @@ function computeCompetitionMultiplier(m) {
 // consistent with typical real-world splits; single-territory releases are
 // treated as fully domestic.
 function splitDomesticIntl(m, totalCollection) {
-    const countries = m.releaseCountries || ["USA"];
+    const countries = Array.isArray(m && m.releaseCountries) ? m.releaseCountries : [];
+    if (!countries.length || Number(totalCollection || 0) <= 0) return { domestic:0, international:0 };
     const domesticShare = countries.length <= 1 ? 1.0 : 0.62;
     const domestic = parseFloat((totalCollection * domesticShare).toFixed(2));
     const international = parseFloat((totalCollection - domestic).toFixed(2));
@@ -8090,10 +8152,8 @@ function releaseMovieCore(m) {
     m.audienceRating = calculateAudienceRating(m);
     m.popularity = calculateInitialPopularity(m);
     
+    m._boxOfficeEngineVersion = BOX_OFFICE_ENGINE_VERSION;
     m.openingWeekendCollection = calculateOpeningWeekendCollection(m);
-    // Apply competition against any other movie also currently in theaters
-    // within the ~2-week overlap window (see computeCompetitionMultiplier).
-    m.openingWeekendCollection = parseFloat((m.openingWeekendCollection * computeCompetitionMultiplier(m)).toFixed(2));
     m.openingCollection = m.openingWeekendCollection;
     // Territory tracking is an additive breakdown of the existing opening
     // total. It does not alter calculateOpeningWeekendCollection().
@@ -10676,69 +10736,7 @@ initializeNewFeatureUI();
 
   const _oldReleaseCore=releaseMovieCore;
   releaseMovieCore=function(m){ensurePreReleaseState(m);ensureReviews(m);m.hypeScore=Math.round(clamp(n(m.hypeScore,60)));_oldReleaseCore(m);ensureReviews(m);m.preReleaseStage='released';};
-  // Territory tracking consumes this authoritative worldwide result after it is
-  // calculated. Extend the existing weekly engine only for Weeks 2–10: the
-  // original Audience Rating decay remains the foundation, while WOM, prior
-  // territory demand and prior occupancy provide bounded legs/retention signals.
-  // No independent territory revenue is created here.
-  const _oldWeekly=calculateWeeklyCollection;
-  calculateWeeklyCollection=function(m,w){
-    if(!m)return 0;
-    const released=typeof getReleasedTerritories==='function'?getReleasedTerritories(m):[];
-    if(!released.length)return 0;
-    const result=_oldWeekly(m,w);
-    if(w<=1)return parseFloat(Math.max(0,result).toFixed(2));
 
-    const wom=clamp(n(m.wordOfMouthScore,60));
-    // WOM changes retention, not the starting revenue. 50 is neutral;
-    // excellent WOM improves holds and poor WOM accelerates the fall.
-    const womRetention=0.90+(wom/100)*0.20;
-
-    // Use the existing territory-demand model as a small legs signal.
-    // Market size is used only to weight the already-selected territories; it
-    // never creates revenue or grants access to an unselected market.
-    let demandWeight=0, demandTotal=0;
-    released.forEach(t=>{
-      const meta=TERRITORY_META[t];
-      const weight=Math.max(1,Number(meta&&meta.marketSize||1));
-      const demand=Math.max(0,Number(territoryDemandScore(m,t,w)||0));
-      demandWeight+=weight;
-      demandTotal+=demand*weight;
-    });
-    const avgDemand=demandWeight?demandTotal/demandWeight:1;
-    // Territory scores are multiplicative demand indices, so use a logarithmic
-    // normalization rather than treating the raw score as a percentage. This
-    // keeps weak/strong markets meaningfully different without letting one
-    // unusually strong territory dominate the worldwide legs.
-    const demandSignal=clamp(50+28*Math.log2(Math.max(0.25,avgDemand)),15,100);
-    const demandRetention=0.90+(demandSignal/100)*0.18;
-
-    // Previous week's recorded occupancy is a utilization/legs check. It is
-    // intentionally bounded so occupancy cannot become a runaway multiplier.
-    let occWeight=0, occTotal=0;
-    released.forEach(t=>{
-      const rec=m.territoryBoxOffice&&m.territoryBoxOffice[t];
-      const weeks=rec&&Array.isArray(rec.weekly)?rec.weekly:[];
-      const previous=weeks.length?Number(weeks[weeks.length-1].occupancy):0;
-      if(Number.isFinite(previous)){
-        const meta=TERRITORY_META[t];
-        const weight=Math.max(1,Number(meta&&meta.marketSize||1));
-        occWeight+=weight;
-        occTotal+=Math.max(0,Math.min(100,previous))*weight;
-      }
-    });
-    const avgOccupancy=occWeight?occTotal/occWeight:50;
-    const occupancySignal=Math.max(20,Math.min(95,avgOccupancy));
-    const occupancyRetention=0.95+(occupancySignal/100)*0.10;
-
-    // The existing weekly result already contains the Audience Rating decay,
-    // festival multiplier, genre trend multiplier and controlled variance.
-    // Apply only bounded post-release signals on top of that result. There is
-    // deliberately NO blanket percentage-of-opening cap here: legitimate
-    // festival/genre effects must be able to remain visible.
-    const finalResult = result * womRetention * demandRetention * occupancyRetention;
-    return parseFloat(Math.max(0,finalResult).toFixed(2));
-  };
   const _oldRenderReleaseDashboard=renderReleaseDashboard;
   renderReleaseDashboard=function(){
     _oldRenderReleaseDashboard();
