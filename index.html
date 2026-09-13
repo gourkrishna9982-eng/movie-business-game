@@ -1142,6 +1142,7 @@ body {
         <button id="activeMovieMarketingBtn" class="sim-btn sim-btn-confirm" style="width:auto; padding:8px 16px; background:#9333ea; display:none;" onclick="showView('marketingView')">Plan Marketing</button>
         <button id="activeMovieTeaserBtn" class="sim-btn sim-btn-confirm" style="width:auto; padding:8px 16px; background:#0f766e; display:none;" onclick="showView('teaserTestingView')">🎞️ Test Teaser</button>
         <button id="activeMovieTrailerBtn" class="sim-btn sim-btn-confirm" style="width:auto; padding:8px 16px; background:#7c3aed; display:none;" onclick="showView('trailerTestingView')">🎬 Test Trailer</button>
+        <button id="activeMovieSongsBtn" class="sim-btn sim-btn-confirm" style="width:auto; padding:8px 16px; background:#db2777; display:none;" onclick="showView('songReleaseView')">🎵 Manage Songs</button>
         <button id="activeMovieForecastBtn" class="sim-btn sim-btn-confirm" style="width:auto; padding:8px 16px; background:#0369a1; display:none;" onclick="showView('preMarketingForecastView')">📊 Pre-Marketing Forecast</button>
         <button id="activeMovieReleasePlanBtn" class="sim-btn sim-btn-confirm" style="width:auto; padding:8px 16px; background:#dc2626; display:none;" onclick="showView('releasePlanningView')">Plan Release</button>
         <button id="activeMovieReleaseDashBtn" class="sim-btn sim-btn-confirm" style="width:auto; padding:8px 16px; background:#ea580c; display:none;" onclick="showView('releaseDashboardView')">Release Dashboard</button>
@@ -1943,13 +1944,19 @@ body {
                 <i class="fa-solid fa-angle-down sb-arrow"></i>
             </div>
             <div class="sb-tag-group single-select">
-                <button class="sb-tag" onclick="selectTag(this)">Tamil</button>
-                <button class="sb-tag" onclick="selectTag(this)">English</button>
-                <button class="sb-tag" onclick="selectTag(this)">French</button>
-                <button class="sb-tag" onclick="selectTag(this)">Russian</button>
+                <button class="sb-tag" onclick="selectTag(this)">🇨🇳 China</button>
+                <button class="sb-tag" onclick="selectTag(this)">🇺🇸 USA</button>
+                <button class="sb-tag" onclick="selectTag(this)">🇷🇺 Russia</button>
+                <button class="sb-tag" onclick="selectTag(this)">🇬🇧 UK</button>
+                <button class="sb-tag" onclick="selectTag(this)">🌍 Middle East</button>
+                <button class="sb-tag" onclick="selectTag(this)">🌏 Southeast Asia</button>
+                <button class="sb-tag" onclick="selectTag(this)">🇯🇵 Japan</button>
+                <button class="sb-tag" onclick="selectTag(this)">🌎 Other Overseas</button>
                 <button class="sb-tag" onclick="selectTag(this)">Hindi</button>
-                <button class="sb-tag" onclick="selectTag(this)">Chinese</button>
-                <button class="sb-tag" onclick="selectTag(this)">Korean</button>
+                <button class="sb-tag" onclick="selectTag(this)">Tamil</button>
+                <button class="sb-tag" onclick="selectTag(this)">Telugu</button>
+                <button class="sb-tag" onclick="selectTag(this)">Malayalam</button>
+                <button class="sb-tag" onclick="selectTag(this)">Kannada</button>
             </div>
         </div>
 
@@ -1962,13 +1969,19 @@ body {
                 <i class="fa-solid fa-angle-down sb-arrow"></i>
             </div>
             <div class="sb-tag-group multi-select">
-                <button class="sb-tag" onclick="selectTag(this)">Tamil <span class="charge-cr green">(5Cr)</span></button>
-                <button class="sb-tag" onclick="selectTag(this)">English <span class="charge-cr green">(40Cr)</span></button>
-                <button class="sb-tag" onclick="selectTag(this)">French <span class="charge-cr green">(20Cr)</span></button>
-                <button class="sb-tag" onclick="selectTag(this)">Russian <span class="charge-cr green">(30Cr)</span></button>
-                <button class="sb-tag" onclick="selectTag(this)">Hindi <span class="charge-cr red">(38Cr)</span></button>
-                <button class="sb-tag" onclick="selectTag(this)">Chinese <span class="charge-cr green">(40Cr)</span></button>
-                <button class="sb-tag" onclick="selectTag(this)">Korean <span class="charge-cr green">(20Cr)</span></button>
+                <button class="sb-tag" onclick="selectTag(this)">🇨🇳 China <span class="charge-cr green">(60Cr)</span></button>
+                <button class="sb-tag" onclick="selectTag(this)">🇺🇸 USA <span class="charge-cr green">(45Cr)</span></button>
+                <button class="sb-tag" onclick="selectTag(this)">🇷🇺 Russia <span class="charge-cr green">(30Cr)</span></button>
+                <button class="sb-tag" onclick="selectTag(this)">🇬🇧 UK <span class="charge-cr green">(30Cr)</span></button>
+                <button class="sb-tag" onclick="selectTag(this)">🌍 Middle East <span class="charge-cr green">(35Cr)</span></button>
+                <button class="sb-tag" onclick="selectTag(this)">🌏 Southeast Asia <span class="charge-cr green">(25Cr)</span></button>
+                <button class="sb-tag" onclick="selectTag(this)">🇯🇵 Japan <span class="charge-cr green">(35Cr)</span></button>
+                <button class="sb-tag" onclick="selectTag(this)">🌎 Other Overseas <span class="charge-cr green">(40Cr)</span></button>
+                <button class="sb-tag" onclick="selectTag(this)">Hindi <span class="charge-cr red">(50Cr)</span></button>
+                <button class="sb-tag" onclick="selectTag(this)">Tamil <span class="charge-cr green">(35Cr)</span></button>
+                <button class="sb-tag" onclick="selectTag(this)">Telugu <span class="charge-cr green">(35Cr)</span></button>
+                <button class="sb-tag" onclick="selectTag(this)">Malayalam <span class="charge-cr green">(25Cr)</span></button>
+                <button class="sb-tag" onclick="selectTag(this)">Kannada <span class="charge-cr green">(25Cr)</span></button>
             </div>
         </div>
 
@@ -2328,146 +2341,174 @@ body {
                         </tr>
                     </thead>
                     <tbody>
-                        <tr class="selected">
-                            <td><input type="checkbox" checked onclick="toggleRow(this)"></td>
-                            <td><strong>USA</strong></td>
-                            <td>English</td>
-                            <td><span class="stars-yellow">★★★★★</span></td>
-                            <td><strong class="cost-cell">₹80 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>China</strong></td>
-                            <td>Chinese</td>
-                            <td><span class="stars-yellow">★★★★★</span></td>
-                            <td><strong class="cost-cell">₹75 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>India</strong></td>
-                            <td>Hindi</td>
-                            <td><span class="stars-yellow">★★★★★</span></td>
-                            <td><strong class="cost-cell">₹60 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>Japan</strong></td>
-                            <td>English</td>
-                            <td><span class="stars-yellow">★★★★</span><span class="stars-gray">★</span></td>
-                            <td><strong class="cost-cell">₹45 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>South Korea</strong></td>
-                            <td>Korean</td>
-                            <td><span class="stars-yellow">★★★★</span><span class="stars-gray">★</span></td>
-                            <td><strong class="cost-cell">₹40 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>United Kingdom</strong></td>
-                            <td>English</td>
-                            <td><span class="stars-yellow">★★★★</span><span class="stars-gray">★</span></td>
-                            <td><strong class="cost-cell">₹38 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>Germany</strong></td>
-                            <td>English</td>
-                            <td><span class="stars-yellow">★★★★</span><span class="stars-gray">★</span></td>
-                            <td><strong class="cost-cell">₹35 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>France</strong></td>
-                            <td>French</td>
-                            <td><span class="stars-yellow">★★★★</span><span class="stars-gray">★</span></td>
-                            <td><strong class="cost-cell">₹34 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>Canada</strong></td>
-                            <td>English</td>
-                            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
-                            <td><strong class="cost-cell">₹32 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>Australia</strong></td>
-                            <td>English</td>
-                            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
-                            <td><strong class="cost-cell">₹30 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>Brazil</strong></td>
-                            <td>English</td>
-                            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
-                            <td><strong class="cost-cell">₹28 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>Mexico</strong></td>
-                            <td>English</td>
-                            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
-                            <td><strong class="cost-cell">₹26 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>Russia</strong></td>
-                            <td>Russian</td>
-                            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
-                            <td><strong class="cost-cell">₹25 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>Spain</strong></td>
-                            <td>English</td>
-                            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
-                            <td><strong class="cost-cell">₹23 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>Italy</strong></td>
-                            <td>English</td>
-                            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
-                            <td><strong class="cost-cell">₹22 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>Indonesia</strong></td>
-                            <td>English</td>
-                            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
-                            <td><strong class="cost-cell">₹20 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>Turkey</strong></td>
-                            <td>English</td>
-                            <td><span class="stars-yellow">★★</span><span class="stars-gray">★★★</span></td>
-                            <td><strong class="cost-cell">₹18 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>Thailand</strong></td>
-                            <td>English</td>
-                            <td><span class="stars-yellow">★★</span><span class="stars-gray">★★★</span></td>
-                            <td><strong class="cost-cell">₹16 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>UAE</strong></td>
-                            <td>English</td>
-                            <td><span class="stars-yellow">★★</span><span class="stars-gray">★★★</span></td>
-                            <td><strong class="cost-cell">₹15 Cr</strong></td>
-                        </tr>
-                        <tr>
-                            <td><input type="checkbox" onclick="toggleRow(this)"></td>
-                            <td><strong>Malaysia</strong></td>
-                            <td>English</td>
-                            <td><span class="stars-yellow">★★</span><span class="stars-gray">★★★</span></td>
-                            <td><strong class="cost-cell">₹12 Cr</strong></td>
-                        </tr>
+        <tr>
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇮🇳 India</strong></td>
+            <td>Hindi</td>
+            <td><span class="stars-yellow">★★★★★</span></td>
+            <td><strong class="cost-cell">₹100 Cr</strong></td>
+        </tr>
+        <tr class="selected">
+            <td><input type="checkbox" checked onclick="toggleRow(this)"></td>
+            <td><strong>🇺🇸 USA</strong></td>
+            <td>English</td>
+            <td><span class="stars-yellow">★★★★★</span></td>
+            <td><strong class="cost-cell">₹100 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇨🇳 China</strong></td>
+            <td>Chinese</td>
+            <td><span class="stars-yellow">★★★★★</span></td>
+            <td><strong class="cost-cell">₹90 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇯🇵 Japan</strong></td>
+            <td>English</td>
+            <td><span class="stars-yellow">★★★★</span><span class="stars-gray">★</span></td>
+            <td><strong class="cost-cell">₹50 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇰🇷 South Korea</strong></td>
+            <td>Korean</td>
+            <td><span class="stars-yellow">★★★★</span><span class="stars-gray">★</span></td>
+            <td><strong class="cost-cell">₹45 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇬🇧 UK</strong></td>
+            <td>English</td>
+            <td><span class="stars-yellow">★★★★</span><span class="stars-gray">★</span></td>
+            <td><strong class="cost-cell">₹50 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇩🇪 Germany</strong></td>
+            <td>English</td>
+            <td><span class="stars-yellow">★★★★</span><span class="stars-gray">★</span></td>
+            <td><strong class="cost-cell">₹40 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇫🇷 France</strong></td>
+            <td>French</td>
+            <td><span class="stars-yellow">★★★★</span><span class="stars-gray">★</span></td>
+            <td><strong class="cost-cell">₹40 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇨🇦 Canada</strong></td>
+            <td>English</td>
+            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
+            <td><strong class="cost-cell">₹35 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇦🇺 Australia</strong></td>
+            <td>English</td>
+            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
+            <td><strong class="cost-cell">₹35 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇳🇿 New Zealand</strong></td>
+            <td>English</td>
+            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
+            <td><strong class="cost-cell">₹15 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇷🇺 Russia</strong></td>
+            <td>Russian</td>
+            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
+            <td><strong class="cost-cell">₹30 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇸🇦 Saudi Arabia</strong></td>
+            <td>Arabic</td>
+            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
+            <td><strong class="cost-cell">₹30 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇦🇪 UAE</strong></td>
+            <td>Arabic</td>
+            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
+            <td><strong class="cost-cell">₹25 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇸🇬 Singapore</strong></td>
+            <td>English</td>
+            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
+            <td><strong class="cost-cell">₹18 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇮🇩 Indonesia</strong></td>
+            <td>Indonesian</td>
+            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
+            <td><strong class="cost-cell">₹22 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇲🇾 Malaysia</strong></td>
+            <td>Malay</td>
+            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
+            <td><strong class="cost-cell">₹18 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇹🇭 Thailand</strong></td>
+            <td>Thai</td>
+            <td><span class="stars-yellow">★★</span><span class="stars-gray">★★★</span></td>
+            <td><strong class="cost-cell">₹15 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇹🇷 Turkey</strong></td>
+            <td>Turkish</td>
+            <td><span class="stars-yellow">★★</span><span class="stars-gray">★★★</span></td>
+            <td><strong class="cost-cell">₹16 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇪🇸 Spain</strong></td>
+            <td>Spanish</td>
+            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
+            <td><strong class="cost-cell">₹18 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇮🇹 Italy</strong></td>
+            <td>Italian</td>
+            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
+            <td><strong class="cost-cell">₹18 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇧🇷 Brazil</strong></td>
+            <td>Portuguese</td>
+            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
+            <td><strong class="cost-cell">₹18 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇲🇽 Mexico</strong></td>
+            <td>Spanish</td>
+            <td><span class="stars-yellow">★★★</span><span class="stars-gray">★★</span></td>
+            <td><strong class="cost-cell">₹15 Cr</strong></td>
+        </tr>
+        <tr class="">
+            <td><input type="checkbox" onclick="toggleRow(this)"></td>
+            <td><strong>🇿🇦 South Africa</strong></td>
+            <td>English</td>
+            <td><span class="stars-yellow">★★</span><span class="stars-gray">★★★</span></td>
+            <td><strong class="cost-cell">₹14 Cr</strong></td>
+        </tr>
                     </tbody>
                 </table>
             </div>
@@ -3121,6 +3162,14 @@ body {
   </div>
 </div>
 
+
+<div id="songReleaseView" class="page-view">
+  <div class="header"><div class="icon" onclick="showView('dashboardView')"><i class="fa-solid fa-angle-left"></i></div><h1>🎵 SONG RELEASE</h1><div class="user-info"><div class="icon"><i class="fa-solid fa-music"></i></div></div></div>
+  <div class="wd-container" style="margin-top:20px;">
+    <div class="movie-summary-card"><div><h3 style="color:#db2777;font-size:18px;">Target Movie: <span id="songMovieTitle" style="color:#fff;">-</span></h3><p style="font-size:12px;color:#94a3b8;margin-top:4px;">Songs are separate business entities. Their budgets and collections never become movie budget or movie collection.</p></div><button class="wd-btn" onclick="showView('dashboardView')">Return to Dashboard</button></div>
+    <div id="songReleaseCard" class="mkt-category-card" style="margin-top:1rem;"></div>
+  </div>
+</div>
 
 <div id="teaserTestingView" class="page-view">
   <div class="header"><div class="icon" onclick="showView('dashboardView')"><i class="fa-solid fa-angle-left"></i></div><h1>🎞️ TEASER TESTING</h1><div class="user-info"><div class="icon"><i class="fa-solid fa-flask"></i></div></div></div>
@@ -4982,7 +5031,7 @@ function getFestivalMultiplier(weekVal, selectedGenres, movie) {
    This layer only allocates that already-computed result across the countries
    the player actually selected for release and records the breakdown.
    ============================================================================ */
-const TERRITORY_BOX_OFFICE_VERSION = 3;
+const TERRITORY_BOX_OFFICE_VERSION = 4;
 
 /*
  * These are market characteristics, not fixed box-office percentages.
@@ -5019,7 +5068,10 @@ const TERRITORY_COUNTRY_ALIASES = Object.fromEntries(
 );
 
 function normalizeTerritoryText(value) {
-    return String(value || '').trim().toLowerCase().replace(/[._-]/g,' ').replace(/\s+/g,' ');
+    return String(value || '').trim().toLowerCase()
+        .replace(/^[\u{1F1E6}-\u{1F1FF}]{2}\s*/u, '')
+        .replace(/[._-]/g,' ')
+        .replace(/\s+/g,' ');
 }
 function canonicalTerritoryForCountry(country) {
     const key = normalizeTerritoryText(country);
@@ -5087,6 +5139,25 @@ function territoryMarketValue(talent) {
     if (!talent) return 50;
     return Number(talent.currentMarketValue || talent.baseMarketValue || talent.starPower || 50);
 }
+function territoryRegionalGroup(territory) {
+    if (territory === 'India') return 'india';
+    if (territory === 'China') return 'china';
+    if (territory === 'USA') return 'usa';
+    if (territory === 'Russia') return 'russia';
+    if (territory === 'United Kingdom') return 'uk';
+    if (['UAE'].includes(territory)) return 'middleEast';
+    if (['Indonesia','Malaysia','Singapore','Thailand'].includes(territory)) return 'southeastAsia';
+    if (territory === 'Japan') return 'japan';
+    return 'otherOverseas';
+}
+function territoryRegionalStarPower(talent, territory) {
+    if (!talent) return 50;
+    const group = territoryRegionalGroup(territory);
+    const regional = talent.regionalStarPower || talent.regionalStarpower;
+    const value = regional && Number(regional[group]);
+    if (Number.isFinite(value)) return Math.max(0, Math.min(100, value));
+    return Math.max(0, Math.min(100, Number(talent.starPower || 50)));
+}
 function territoryTalentAffinity(talent, territory, roleWeight = 1) {
     if (!talent) return 1;
     const meta = territoryCountryProfile(territory);
@@ -5095,7 +5166,7 @@ function territoryTalentAffinity(talent, territory, roleWeight = 1) {
     const nationality = territoryNationalityKey(talent.nationality);
     const industryFactor = Number(meta.industryAffinity && meta.industryAffinity[industry] || 1);
     const nationalityFactor = Number(meta.nationalityAffinity && meta.nationalityAffinity[nationality] || 1);
-    const star = Math.max(0, Math.min(100, Number(talent.starPower || 50))) / 100;
+    const star = territoryRegionalStarPower(talent, territory) / 100;
     const market = Math.max(0.45, Math.min(2.5, territoryMarketValue(talent) / 100));
     const marketAffinity = Math.max(0.55, Math.min(1.75, (industryFactor * 0.55) + (nationalityFactor * 0.45)));
     const recognition = 0.38 + Math.pow(star, 1.35) * 0.62;
@@ -5112,7 +5183,7 @@ function territoryCastMarketPower(movie, territory) {
     // simple actor count.
     const contributions = cast.map(item => {
         const t = item.talent;
-        const star = Math.max(0, Math.min(100, Number(t.starPower || 50))) / 100;
+        const star = territoryRegionalStarPower(t, territory) / 100;
         const market = Math.max(0.45, Math.min(2.5, territoryMarketValue(t) / 100));
         const affinity = territoryTalentAffinity(t, territory, item.roleWeight);
         const importance = Math.pow(Math.max(0.2, item.roleWeight), 0.78);
@@ -5129,7 +5200,7 @@ function territoryCastMarketPower(movie, territory) {
     // effect, but the logarithmic curve prevents 5 stars from becoming 5×.
     const majorStars = cast.filter(item => {
         const t = item.talent;
-        return Number(t.starPower || 0) >= 78 || territoryMarketValue(t) >= 85;
+        return territoryRegionalStarPower(t, territory) >= 78 || territoryMarketValue(t) >= 85;
     }).length;
     const ensembleBonus = 1 + Math.min(0.48, Math.log1p(majorStars) * 0.12);
     const leadPresence = contributions.slice(0,3).reduce((a,b)=>a+b,0);
@@ -5165,21 +5236,58 @@ function territoryFranchiseFactor(movie, territory) {
 function territoryLanguageMatch(movie, territory) {
     const meta = territoryCountryProfile(territory);
     if (!meta) return 1;
+
     const original = territoryNameKey(movie && movie.originalLanguage);
     const dubs = (movie && movie.dubbingLanguages || []).map(territoryNameKey);
     const local = territoryNameKey(meta.language);
-    const accessible = meta.languages.some(lang => dubs.includes(territoryNameKey(lang)));
+    const regionalGroup = territoryRegionalGroup(territory);
+    const indian = ['hindi','tamil','telugu','malayalam','kannada'];
+
+    // India is one UI territory, but language accessibility is intentionally
+    // differentiated internally. These are simulation weights, not population
+    // percentages. Dubs expand reach; they do not replace native access.
     if (territory === 'India') {
-        if (['hindi','tamil','telugu','malayalam','kannada'].includes(original)) return 1.38;
-        if (dubs.some(x => ['hindi','tamil','telugu','malayalam','kannada'].includes(x))) return 1.22;
-        if (original === 'english' || dubs.includes('english')) return 1.08;
-        return 0.70;
+        const nativeAccess = {hindi:1.42,tamil:1.28,telugu:1.25,malayalam:1.15,kannada:1.18};
+        if (indian.includes(original)) {
+            const native = nativeAccess[original];
+            const hasHindiDub = original !== 'hindi' && dubs.includes('hindi');
+            const hasOtherIndianDub = dubs.some(d => indian.includes(d) && d !== original);
+            if (hasHindiDub) return Math.min(1.36, native + 0.08);
+            if (hasOtherIndianDub) return Math.min(1.47, native + 0.05);
+            return native;
+        }
+        // Foreign originals need an Indian-language dub for strong domestic
+        // accessibility. Hindi provides the broadest nationwide access.
+        if (dubs.includes('hindi')) return 1.12;
+        if (dubs.some(d => indian.includes(d))) return 1.08;
+        return 0.38;
     }
-    if (original === local) return 1.38;
-    if (dubs.includes(local)) return 1.24;
-    if (local === 'english' && (original === 'english' || dubs.includes('english'))) return 1.18;
+
+    const originalGroup = {
+        china:'china', usa:'usa', russia:'russia', uk:'uk',
+        middleeast:'middleEast', southeastasia:'southeastAsia', japan:'japan',
+        otheroverseas:'otherOverseas'
+    }[original];
+
+    // Keep the existing overseas group hierarchy: native/original > suitable
+    // local/regional dub > broader compatible dub > no suitable access.
+    if (originalGroup && originalGroup === regionalGroup) return 1.55;
+    if (original === local && original === 'english') return 1.14;
+
+    const dubbedToRegionalGroup = dubs.some(d => {
+        const group = {
+            china:'china', usa:'usa', russia:'russia', uk:'uk',
+            middleeast:'middleEast', southeastasia:'southeastAsia', japan:'japan',
+            otheroverseas:'otherOverseas', hindi:'india', tamil:'india',
+            telugu:'india', malayalam:'india', kannada:'india', english:'usa'
+        }[d];
+        return group === regionalGroup || d === local;
+    });
+    if (dubbedToRegionalGroup) return 1.20;
+
+    const accessible = meta.languages.some(lang => dubs.includes(territoryNameKey(lang)));
     if (accessible) return 1.08;
-    return 0.62;
+    return 0.38;
 }
 function territoryGenreInterest(movie, territory) {
     const meta = territoryCountryProfile(territory);
@@ -5240,6 +5348,10 @@ function territoryControlledVariance(movie, territory, weekNumber) {
 }
 function territoryDemandScore(movie, territory, weekNumber) {
     const m = movie || {};
+    // Country Release is a strict access gate for movie collection. Only a
+    // canonically selected release territory may receive a demand score.
+    // Unselected territories are excluded before any collection factors run.
+    if (!getReleasedTerritories(m).includes(territory)) return 0;
     const meta = territoryCountryProfile(territory);
     if (!meta) return 0.15;
 
@@ -5584,7 +5696,8 @@ function calculateScriptDetailsAndQuality(m) {
         const countryName = row.cells[1].innerText.trim();
         releaseCountries.push(countryName);
     });
-    if (releaseCountries.length === 0) releaseCountries.push("USA");
+    // Do not auto-add a release market. An empty Country Release selection
+    // must remain an empty release so movie collection is exactly 0.
 
     // Preserve the Production Setup country-release selection AND the exact
     // release budget paid for each selected country. This becomes the source
@@ -5925,7 +6038,10 @@ function finishCompleteScript() {
             supporting: parseInt(document.getElementById('supportVal').innerText) || 0,
             cameo: parseInt(document.getElementById('cameoVal').innerText) || 0
         },
-        cast: { hero: [], villain: [], heroine: [], supporting: [], cameo: [] }
+        cast: { hero: [], villain: [], heroine: [], supporting: [], cameo: [] },
+        // Independent song-business ledger. Song expenses/revenue never flow
+        // into the movie budget/collection totals.
+        songs: []
     };
 
     ensureFranchiseForMovie(newMovie);
@@ -7657,7 +7773,11 @@ function calculateInitialPopularity(m) {
 }
 
 function calculateOpeningWeekendCollection(m) {
-    if (!m) return 1.0;
+    // Country Release is a hard gate. A movie with no selected release market
+    // cannot generate opening collection anywhere.
+    if (!m) return 0;
+    const countries = Array.isArray(m.releaseCountries) ? m.releaseCountries : [];
+    if (!countries.length) return 0;
     
     const baselinePotential = {
         "USA": 120,
@@ -7706,20 +7826,18 @@ function calculateOpeningWeekendCollection(m) {
     };
 
     let totalPotentialMarket = 0;
-    const countries = m.releaseCountries || ["USA"];
-    const origLangLower = (m.originalLanguage || "English").toLowerCase();
-    const dubsLower = (m.dubbingLanguages || []).map(l => l.toLowerCase());
 
     countries.forEach(c => {
-        let basPotential = baselinePotential[c] || 20;
-        let nativeLang = localLanguages[c] || "english";
-        let isMatched = (nativeLang === origLangLower) || dubsLower.includes(nativeLang);
-        
-        if (!isMatched) {
-            basPotential *= 0.55;
-        }
-        
-        totalPotentialMarket += basPotential;
+        // Only explicitly released countries enter opening potential. Language
+        // is taken from the same territory accessibility model used by the
+        // country-wise allocator, preventing two competing language systems.
+        const territory = canonicalTerritoryForCountry(c) || c;
+        const access = Math.max(0, Number(territoryLanguageMatch(m, territory) || 0));
+        let basPotential = baselinePotential[c] || baselinePotential[territory] || 20;
+        // Keep language as accessibility rather than a direct collection
+        // multiplier: it changes the reachable portion of this market's base.
+        const accessShare = Math.max(0, Math.min(1, 0.45 + access * 0.32));
+        totalPotentialMarket += basPotential * accessShare;
     });
     
     let captureRate = (m.popularity / 100) * 0.28;
@@ -10523,6 +10641,122 @@ initializeNewFeatureUI();
   calculateCriticsRating=function(m){return round1(reviewCritics(m));};
   calculateAudienceRating=function(m){return round1(reviewAudience(m));};
 
+  // Audience Expectations is a pre-release expectation signal, not a box-office multiplier.
+  // It is calculated per released territory from existing regional star power,
+  // franchise history, hype/marketing, genre demand, director reputation and
+  // existing production-scale information where available.  It is compared
+  // with the movie's actual audience experience only after release.
+  const AUDIENCE_EXPECTATIONS_VERSION = 2;
+  function expectationGenreScore(m){
+    const genres=Array.isArray(m&&m.genres)?m.genres:[];
+    if(!genres.length)return 50;
+    const profiles={
+      action:82,adventure:80,scifi:82,'sci-fi':82,fantasy:80,war:84,
+      romance:74,comedy:76,horror:78,thriller:80,drama:72,family:70,
+      animation:76,musical:73,crime:77,mystery:77,biography:68,documentary:62
+    };
+    const vals=genres.map(g=>profiles[String(g).trim().toLowerCase()]||70);
+    return clamp(avg(vals,70));
+  }
+  function expectationStarScore(m,territory){
+    const leads=territoryLeadCast(m);
+    if(!leads.length)return 50;
+    const vals=leads.map(t=>territoryRegionalStarPower(t,territory));
+    const base=avg(vals,50);
+    const major=vals.filter(v=>v>=78).length;
+    const combinationBonus=major>=2?Math.min(6,(major-1)*3):0;
+    return clamp(base+combinationBonus);
+  }
+  function expectationLanguageFactor(m,territory){
+    const match=Number(territoryLanguageMatch(m,territory));
+    if(match>=1.50)return 1.00; // native/original market
+    if(match>=1.15)return 0.86; // suitable dubbing / strong access
+    if(match>=1.00)return 0.76; // mild existing compatibility
+    return 0.52; // major accessibility barrier
+  }
+  function expectationFranchiseScore(m){
+    const has=!!(m&&((m.franchiseId)||(m.franchiseName&&String(m.franchiseName).trim())));
+    if(!has)return 35;
+    return clamp(franchiseScore(m));
+  }
+  function expectationMarketingScore(m){
+    const reach=marketingReach(m);
+    const hype=clamp(n(m.hypeScore,60));
+    const teaser=m&&m.teaserScore!=null?n(m.teaserScore,60):hype;
+    const trailer=m&&m.trailerScore!=null?n(m.trailerScore,60):hype;
+    return clamp(reach*0.35+hype*0.35+teaser*0.10+trailer*0.20);
+  }
+  function expectationScaleScore(m){
+    // No new scale system is introduced. Use existing production/VFX signals
+    // only when those fields already exist on the movie.
+    const existing=[];
+    if(m&&m.totalProductionCost!=null) existing.push(clamp(35+Math.log10(1+Math.max(0,n(m.totalProductionCost,0)))*18));
+    if(m&&m.vfx&&m.vfx.quality!=null) existing.push(vfxScore(m));
+    if(!existing.length)return 50;
+    return clamp(avg(existing,50));
+  }
+  function calculateTerritoryAudienceExpectation(m,territory){
+    const star=expectationStarScore(m,territory);
+    const franchise=expectationFranchiseScore(m);
+    const marketing=expectationMarketingScore(m);
+    const genre=expectationGenreScore(m);
+    const director=directorScore(m);
+    const scale=expectationScaleScore(m);
+    const language=expectationLanguageFactor(m,territory);
+
+    // Star power is deliberately the strongest contributor. Language access
+    // changes how much of that market can realistically build expectations,
+    // while marketing/buzz, franchise history and genre shape the ceiling.
+    const raw=(star*0.42+marketing*0.18+franchise*0.14+genre*0.10+director*0.07+scale*0.04+50*0.05);
+    return Math.round(clamp(raw*language + 50*(1-language)*0.18));
+  }
+  function calculateAudienceExpectations(m){
+    ensurePreReleaseState(m);
+    const territories=getReleasedTerritories(m);
+    const list=territories.length?territories:['USA'];
+    const byTerritory={};
+    list.forEach(t=>{byTerritory[t]=calculateTerritoryAudienceExpectation(m,t);});
+    const weights=list.map(t=>Number((TERRITORY_META[t]&&TERRITORY_META[t].marketSize)||50));
+    const totalWeight=weights.reduce((a,b)=>a+b,0)||1;
+    const overall=Math.round(clamp(list.reduce((sum,t,i)=>sum+byTerritory[t]*weights[i],0)/totalWeight));
+    m.audienceExpectationsByTerritory=byTerritory;
+    m.audienceExpectations=overall;
+    m.audienceExpectationLabel=overall>=91?'Massive Expectations':overall>=81?'Very High Expectations':overall>=66?'High Expectations':overall>=51?'Moderate Expectations':overall>=31?'Low Expectations':'Very Low Expectations';
+    m.audienceExpectationsVersion=AUDIENCE_EXPECTATIONS_VERSION;
+    return overall;
+  }
+  function applyAudienceExpectationReaction(m){
+    if(!m)return m;
+    calculateAudienceExpectations(m);
+    const expectation=clamp(n(m.audienceExpectations,50));
+    const baseExperience=clamp(n(m._audienceExperienceBase,n(m.audienceRating,6)*10));
+    m._audienceExperienceBase=baseExperience;
+    const gap=Number((baseExperience-expectation).toFixed(2));
+    m.expectationGap=gap;
+
+    // Expectations influence satisfaction, but only gently; actual audience
+    // experience remains the dominant source of the rating.
+    const ratingAdjustment=clamp(gap*0.025,-0.2,0.2);
+    m.audienceRating=round1(clamp(baseExperience/10 + ratingAdjustment));
+
+    const baseWom=clamp(n(m._baseWordOfMouthScore,m.wordOfMouthScore!=null?m.wordOfMouthScore:60));
+    m._baseWordOfMouthScore=baseWom;
+    const gapEffect=Math.max(-10,Math.min(10,gap*0.28));
+    m.wordOfMouthScore=Math.round(clamp(baseWom+gapEffect));
+    m.wordOfMouth=m.wordOfMouthScore>=90?'Outstanding':m.wordOfMouthScore>=75?'Positive':m.wordOfMouthScore>=60?'Mixed':'Terrible';
+    return m;
+  }
+
+  const _oldEnsureReviews=ensureReviews;
+  ensureReviews=function(m){
+    const out=_oldEnsureReviews(m);
+    if(!out || !out.released)return out;
+    if(out.audienceExpectationsVersion!==AUDIENCE_EXPECTATIONS_VERSION || out.expectationGap==null){
+      applyAudienceExpectationReaction(out);
+    }
+    return out;
+  };
+
   const _oldReleaseCore=releaseMovieCore;
   releaseMovieCore=function(m){ensurePreReleaseState(m);ensureReviews(m);m.hypeScore=Math.round(clamp(n(m.hypeScore,60)));_oldReleaseCore(m);ensureReviews(m);m.preReleaseStage='released';};
   // Territory tracking deliberately consumes the result after this function;
@@ -10563,6 +10797,364 @@ initializeNewFeatureUI();
   // Apply migration-safe defaults to already-loaded state as well.
   migratePreReleaseState(gameState);
   updatePreReleaseButtons();
+
+  /* ====================================================================
+     DEDICATED PRE-RELEASE BUZZ + INDEPENDENT SONG RELEASE SYSTEM
+     --------------------------------------------------------------------
+     This layer is intentionally additive. It does not replace the existing
+     teaser/trailer/marketing/hype/review/box-office engines. Pre-release buzz
+     is an awareness/interest signal only; song business is its own ledger.
+     ==================================================================== */
+  (function(){
+    const BUZZ_VERSION = 2;
+    const songClamp=(v,min=0,max=100)=>Math.max(min,Math.min(max,Number.isFinite(Number(v))?Number(v):min));
+    const songNum=(v,d=0)=>Number.isFinite(Number(v))?Number(v):d;
+    const songAvg=(a,d=50)=>a.length?a.reduce((x,y)=>x+y,0)/a.length:d;
+    const songRound=v=>Number(v.toFixed(2));
+    const SONG_TYPES=['Romantic','Party','Dance','Emotional','Sad','Folk','Devotional','Celebration','Theme','Action','Promotional','Other'];
+    const SONG_LANGUAGES=['China','USA','Russia','UK','Middle East','Southeast Asia','Japan','Other Overseas','Hindi','Tamil','Telugu','Malayalam','Kannada'];
+    const SONG_DUBS=['China','USA','Russia','UK','Middle East','Southeast Asia','Japan','Other Overseas','Hindi','Tamil','Telugu','Malayalam','Kannada'];
+    const SONG_COUNTRIES=[
+      ['India','🇮🇳',100],['USA','🇺🇸',100],['China','🇨🇳',90],['Japan','🇯🇵',50],['South Korea','🇰🇷',45],['UK / United Kingdom','🇬🇧',50],
+      ['Germany','🇩🇪',40],['France','🇫🇷',40],['Canada','🇨🇦',35],['Australia','🇦🇺',35],['New Zealand','🇳🇿',15],['Russia','🇷🇺',30],
+      ['Saudi Arabia','🇸🇦',30],['UAE','🇦🇪',25],['Singapore','🇸🇬',18],['Indonesia','🇮🇩',22],['Malaysia','🇲🇾',18],['Thailand','🇹🇭',15],
+      ['Turkey','🇹🇷',16],['Spain','🇪🇸',18],['Italy','🇮🇹',18],['Brazil','🇧🇷',18],['Mexico','🇲🇽',15],['South Africa','🇿🇦',14]
+    ];
+    const SONG_MARKET={
+      'India':{market:100,lang:'hindi',langs:['hindi','english','tamil','telugu','malayalam','kannada'],group:'india'},
+      'USA':{market:100,lang:'english',langs:['english','spanish'],group:'usa'},
+      'China':{market:90,lang:'chinese',langs:['chinese','english'],group:'china'},
+      'Japan':{market:50,lang:'japanese',langs:['japanese','english'],group:'japan'},
+      'South Korea':{market:45,lang:'korean',langs:['korean','english'],group:'otherOverseas'},
+      'UK / United Kingdom':{market:50,lang:'english',langs:['english','hindi'],group:'uk'},
+      'Germany':{market:40,lang:'german',langs:['german','english'],group:'otherOverseas'},
+      'France':{market:40,lang:'french',langs:['french','english'],group:'otherOverseas'},
+      'Canada':{market:35,lang:'english',langs:['english','french','hindi'],group:'otherOverseas'},
+      'Australia':{market:35,lang:'english',langs:['english'],group:'otherOverseas'},
+      'New Zealand':{market:15,lang:'english',langs:['english'],group:'otherOverseas'},
+      'Russia':{market:30,lang:'russian',langs:['russian','english'],group:'russia'},
+      'Saudi Arabia':{market:30,lang:'arabic',langs:['arabic','english','hindi'],group:'middleEast'},
+      'UAE':{market:25,lang:'arabic',langs:['arabic','english','hindi'],group:'middleEast'},
+      'Singapore':{market:18,lang:'english',langs:['english','malay','hindi','tamil'],group:'southeastAsia'},
+      'Indonesia':{market:22,lang:'indonesian',langs:['indonesian','english'],group:'southeastAsia'},
+      'Malaysia':{market:18,lang:'malay',langs:['malay','english','hindi','tamil'],group:'southeastAsia'},
+      'Thailand':{market:15,lang:'thai',langs:['thai','english'],group:'southeastAsia'},
+      'Turkey':{market:16,lang:'turkish',langs:['turkish','english'],group:'otherOverseas'},
+      'Spain':{market:18,lang:'spanish',langs:['spanish','english'],group:'otherOverseas'},
+      'Italy':{market:18,lang:'italian',langs:['italian','english'],group:'otherOverseas'},
+      'Brazil':{market:18,lang:'portuguese',langs:['portuguese','english','spanish'],group:'otherOverseas'},
+      'Mexico':{market:15,lang:'spanish',langs:['spanish','english'],group:'otherOverseas'},
+      'South Africa':{market:14,lang:'english',langs:['english'],group:'otherOverseas'}
+    };
+    const TYPE_PROFILE={Romantic:{appeal:82},Party:{appeal:84},Dance:{appeal:82},Emotional:{appeal:78},Sad:{appeal:70},Folk:{appeal:74},Devotional:{appeal:72},Celebration:{appeal:80},Theme:{appeal:68},Action:{appeal:76},Promotional:{appeal:70},Other:{appeal:65}};
+
+    function ensureSongState(m){
+      if(!m)return;
+      if(!Array.isArray(m.songs))m.songs=[];
+      if(m.songCount==null)m.songCount=0;
+      if(m.songCount>0 && m.songs.length===0){
+        const count=Math.min(20,Math.max(0,Number(m.songCount)||0));
+        for(let i=0;i<count;i++)m.songs.push(makeSong(m,i));
+      }
+      m.songs.forEach((s,i)=>ensureSong(s,m,i));
+    }
+    function makeSong(m,index){
+      return {id:'song_'+Date.now().toString(36)+'_'+index+'_'+Math.random().toString(36).slice(2,7),name:'',type:(m&&m.songType)||'Emotional',singers:[],castIds:[],originalLanguage:'Hindi',dubbingLanguages:[],releaseCountries:[],shootingLocation:'India',budget:{singerFee:0,musicComposition:0,lyrics:0,choreographer:0,dancers:0,location:0,setConstruction:0,costumes:0,makeupStyling:0,equipment:0,productionCrew:0,travel:0,accommodation:0,vfxPost:0,editing:0,recording:0,mixingMastering:0,promotion:0,other:0},quality:70,musicQuality:70,lyricsQuality:70,choreography:70,promotion:50,released:false,releasedAt:null,response:null,responseScore:0,buzz:0,collection:0,collectionByCountry:{},reach:0};
+    }
+    function ensureSong(s,m,i){
+      const d=makeSong(m,i);
+      Object.keys(d).forEach(k=>{if(s[k]===undefined)s[k]=d[k];});
+      if(!Array.isArray(s.singers))s.singers=[];if(!Array.isArray(s.castIds))s.castIds=[];if(!Array.isArray(s.dubbingLanguages))s.dubbingLanguages=[];if(!Array.isArray(s.releaseCountries))s.releaseCountries=[];if(!s.budget||typeof s.budget!=='object')s.budget=d.budget;
+      Object.keys(d.budget).forEach(k=>{if(s.budget[k]===undefined)s.budget[k]=d.budget[k];});
+    }
+    function talentPool(){return [...(typeof EMBEDDED_ACTORS_DATA!=='undefined'?EMBEDDED_ACTORS_DATA:[]),...(typeof EMBEDDED_ACTRESSES_DATA!=='undefined'?EMBEDDED_ACTRESSES_DATA:[])];}
+    function isMusicArtist(t){
+      if(!t||typeof t!=='object')return false;
+      const marker=[t.musicArtist,t.isMusicArtist,t.isSinger,t.singer,t.vocalist,t.musicArtistType,t.artistType,t.profession,t.occupation,t.role,t.category,t.specialization,t.domain]
+        .filter(v=>v!==undefined&&v!==null).join(' ').toLowerCase();
+      return /singer|vocal|musician|music artist|playback|recording artist|composer|music director|artist/.test(marker)
+        || ['musicStarPower','musicStarpower','singingStarPower','singerStarPower','musicAppeal','singingAbility','vocalAbility'].some(k=>Number.isFinite(Number(t[k])));
+    }
+    function musicArtistPool(){return talentPool().filter(isMusicArtist);}
+    function singerById(id){return musicArtistPool().find(a=>String(a.id)===String(id))||null;}
+    function legacySingerRecordById(id){return talentPool().find(a=>String(a.id)===String(id))||null;}
+    function musicAppealValue(t){
+      if(!t||!isMusicArtist(t))return 50;
+      const keys=['musicStarPower','musicStarpower','singingStarPower','singerStarPower','musicAppeal','singingAbility','vocalAbility','musicPopularity','singerPopularity'];
+      for(const k of keys){const v=Number(t[k]);if(Number.isFinite(v))return songClamp(v);}
+      return 50;
+    }
+    function musicFeeValue(t){
+      if(!t||!isMusicArtist(t))return 0;
+      const keys=['singerFee','musicArtistFee','musicFee','artistFee','singingFee','playbackFee','musicContractFee','artistContractFee','musicValue'];
+      for(const k of keys){const v=Number(t[k]);if(Number.isFinite(v)&&v>=0)return v;}
+      return 0;
+    }
+    function castById(m,id){return ['hero','villain','heroine','supporting','cameo'].flatMap(r=>(m.cast&&m.cast[r])||[]).find(a=>String(a.id)===String(id))||null;}
+    function songOriginalGroup(lang){const x=String(lang||'').toLowerCase().replace(/\s+/g,'');return {china:'china',usa:'usa',russia:'russia',uk:'uk',middleeast:'middleEast',southeastasia:'southeastAsia',japan:'japan',otheroverseas:'otherOverseas',hindi:'india',tamil:'india',telugu:'india',malayalam:'india',kannada:'india'}[x]||null;}
+    function songLanguageAccess(song,country){
+      const meta=SONG_MARKET[country];if(!meta)return 0.45;
+      const original=String(song.originalLanguage||'').toLowerCase().replace(/\s+/g,'');
+      const local=String(meta.lang||'').toLowerCase();
+      const dubs=(song.dubbingLanguages||[]).map(x=>String(x).toLowerCase().replace(/\s+/g,''));
+
+      // India is a single release market in the UI, so regional language
+      // differences are represented internally rather than by state selection.
+      if(country==='India'){
+        const indian=['hindi','tamil','telugu','malayalam','kannada'];
+        const nativeAccess={hindi:1.42,tamil:1.28,telugu:1.25,malayalam:1.15,kannada:1.18};
+        const originalIsIndian=indian.includes(original);
+        const native=nativeAccess[original]||0;
+        if(originalIsIndian){
+          // A second Indian-language dub expands access beyond the native
+          // regional base, but can never equal the native Hindi advantage.
+          const hasHindiDub=dubs.includes('hindi')&&original!=='hindi';
+          const hasRegionalDub=dubs.some(d=>indian.includes(d)&&d!==original);
+          if(hasHindiDub)return Math.min(1.36,native+0.08);
+          if(hasRegionalDub)return Math.min(1.47,native+0.05);
+          return native;
+        }
+        // Non-Indian originals need an Indian-language dub to gain meaningful
+        // domestic access; otherwise retain the existing strong penalty.
+        if(dubs.includes('hindi'))return 1.12;
+        if(dubs.some(d=>indian.includes(d)))return 1.08;
+        return 0.38;
+      }
+
+      if(songOriginalGroup(song.originalLanguage)===meta.group)return 1.42;
+      if(original===local)return 1.22;
+      const regional=songOriginalGroup(song.originalLanguage);
+      if(dubs.some(d=>songOriginalGroup(d)===meta.group||d===local.replace(/\s+/g,'')))return 1.12;
+      if(meta.langs.some(l=>dubs.includes(String(l).toLowerCase().replace(/\s+/g,''))))return 1.05;
+      return 0.38;
+    }
+    function songSingerAppeal(song,country){
+      if(!song.singers.length)return 50;
+      const vals=song.singers.map(id=>{
+        const t=singerById(id);
+        if(!t)return 50;
+        const regionalMusicKeys=['musicRegionalStarPower','musicRegionalStarpower','regionalMusicStarPower','regionalSingerPower','regionalMusicAppeal'];
+        const group=typeof territoryRegionalGroup==='function'?territoryRegionalGroup(canonicalSongTerritory(country)):null;
+        for(const k of regionalMusicKeys){
+          const obj=t[k];
+          if(obj&&group&&Number.isFinite(Number(obj[group])))return songClamp(Number(obj[group]));
+        }
+        return musicAppealValue(t);
+      });
+      const sorted=vals.sort((a,b)=>b-a);const dim=[1,.62,.45,.34];let v=0;let weight=0;
+      sorted.forEach((x,i)=>{const w=dim[i]||.25;v+=x*w;weight+=w;});
+      return songClamp(v/Math.max(1,weight));
+    }
+    function canonicalSongTerritory(country){
+      if(country==='UK / United Kingdom')return 'United Kingdom';
+      return typeof canonicalTerritoryForCountry==='function'?(canonicalTerritoryForCountry(country)||country):country;
+    }
+    function songCastAppeal(song,m,country){
+      const vals=(song.castIds||[]).map(id=>castById(m,id)).filter(Boolean).map(t=>typeof territoryRegionalStarPower==='function'?territoryRegionalStarPower(t,canonicalSongTerritory(country)):songNum(t.starPower,50));
+      if(!vals.length)return 50;return songClamp(vals.sort((a,b)=>b-a).slice(0,4).reduce((a,b,i)=>a+b*(i?0.42:1),0)/Math.min(2.26,1+(vals.length>1?.42:0)+(vals.length>2?.25:0)+(vals.length>3?.18:0)));
+    }
+    function songTypeAppeal(song,m,country){
+      const base=(TYPE_PROFILE[song.type]||TYPE_PROFILE.Other).appeal;
+      const genres=m&&m.genres||[];let synergy=0;
+      if(song.type==='Romantic'&&genres.includes('Romance'))synergy=10;
+      else if(song.type==='Emotional'&&genres.includes('Drama'))synergy=8;
+      else if(song.type==='Action'&&genres.some(g=>['Action','Adventure','War'].includes(g)))synergy=7;
+      else if(song.type==='Folk'&&genres.includes('Historical'))synergy=6;
+      else if(song.type==='Devotional'&&genres.includes('Historical'))synergy=5;
+      const meta=SONG_MARKET[country];const gb=meta&&typeof territoryGenreInterest==='function'?territoryGenreInterest(m,canonicalSongTerritory(country)):1;
+      return songClamp(base+synergy+(gb-1)*35);
+    }
+    function songTimingFactor(m){
+      if(!m||!m.releaseDate)return 0.96;
+      const now=(songNum(gameState.currentYear,2000)*52+songNum(gameState.currentWeek,1));
+      const rel=(songNum(m.releaseDate.year,gameState.currentYear)*52+songNum(m.releaseDate.week,gameState.currentWeek));
+      const weeks=rel-now;
+      if(weeks>=1&&weeks<=6)return 1.08;
+      if(weeks>=7&&weeks<=12)return 0.98;
+      if(weeks>12)return 0.84;
+      return 0.92;
+    }
+    function songBudgetTotal(song){return songRound(Object.values(song.budget||{}).reduce((a,v)=>a+Math.max(0,songNum(v,0)),0));}
+    function buzzMarketingReach(m){
+      const spend=Math.max(0,songNum(m&&m.marketingTotal,0));
+      const level=m&&m.marketingConfirmedLevel;
+      const levelBonus=level==='worldwide'?18:level==='country'?10:level==='small'?4:0;
+      return songClamp(Math.min(100,Math.log10(1+spend)*18)+levelBonus);
+    }
+    function songPromotionScore(song,m){
+      const movieReach=buzzMarketingReach(m);
+      return songClamp(songNum(song.promotion,50)*0.65+movieReach*0.20+songNum(m&&m.hypeScore,50)*0.15);
+    }
+    function calculateSongResponse(song,m){
+      const singer=song.singers.length&&song.releaseCountries.length?songAvg(song.releaseCountries.map(c=>songSingerAppeal(song,c)),50):50;
+      const cast=songCastAppeal(song,m,'USA');
+      const type=songTypeAppeal(song,m,'USA');
+      const lang=song.releaseCountries.length?songAvg(song.releaseCountries.map(c=>songLanguageAccess(song,c)),0.38):0.38;
+      const languageScore=songClamp(lang*70);
+      const score=songClamp(songNum(song.quality,70)*0.24+songNum(song.musicQuality,70)*0.22+songNum(song.lyricsQuality,70)*0.12+songNum(song.choreography,70)*0.08+singer*0.10+cast*0.06+type*0.06+languageScore*0.04+songPromotionScore(song,m)*0.08+(Math.random()-0.5)*8);
+      song.responseScore=Math.round(score);song.response=score>=90?'Major Hit':score>=78?'Hit':score>=65?'Positive':score>=50?'Mixed':'Poor';return song.responseScore;
+    }
+    function calculateSongBuzz(song,m){
+      const response=songNum(song.responseScore,calculateSongResponse(song,m));
+      const quality=songClamp(songNum(song.quality,70)*0.34+songNum(song.musicQuality,70)*0.28+songNum(song.lyricsQuality,70)*0.16+songNum(song.choreography,70)*0.08);
+      const singer=song.releaseCountries.length?songAvg(song.releaseCountries.map(c=>songSingerAppeal(song,c)),50):50;
+      const type=song.releaseCountries.length?songAvg(song.releaseCountries.map(c=>songTypeAppeal(song,m,c)),50):50;
+      const language=song.releaseCountries.length?songAvg(song.releaseCountries.map(c=>songLanguageAccess(song,c)),0.38)*70:35;
+      const promotionScore=songClamp(songNum(song.promotion,0));
+      const reach=Math.min(100,Math.log10(1+Math.max(0,songBudgetTotal(song)))*18 + Math.min(24,song.releaseCountries.length*2));
+      const timing=songTimingFactor(m);
+      const base=songClamp(response*0.34+quality*0.24+singer*0.12+type*0.08+language*0.06+promotionScore*0.10+reach*0.06);
+      song.reach=Math.round(reach);song.buzz=Math.round(songClamp(50+(base-50)*timing));return song.buzz;
+    }
+    function calculateSongCollection(song,m){
+      const by={};if(!song.releaseCountries.length){song.collectionByCountry={};song.collection=0;return 0;}
+      const quality=songClamp(songNum(song.quality,70)*0.38+songNum(song.musicQuality,70)*0.27+songNum(song.lyricsQuality,70)*0.12+songNum(song.choreography,70)*0.09+songNum(song.responseScore,65)*0.14);
+      song.releaseCountries.forEach(country=>{
+        const meta=SONG_MARKET[country];if(!meta){by[country]=0;return;}
+        const access=songLanguageAccess(song,country);
+        const singer=songSingerAppeal(song,country);
+        const cast=songCastAppeal(song,m,country);
+        const type=songTypeAppeal(song,m,country);
+        const movieBuzz=songClamp(songNum(m&&m.preReleaseBuzz,50));
+        const songAwareness=0.90+(movieBuzz/100)*0.10;
+        const timing=songTimingFactor(m);
+        const base=meta.market*0.23*access*(0.45+ singer/100*0.55)*(0.60+cast/100*0.40)*(0.62+quality/100*0.68)*(0.65+type/100*0.35)*songAwareness*timing;
+        const variance=0.82+Math.random()*0.36;
+        by[country]=Math.max(0,songRound(base*variance));
+      });
+      song.collectionByCountry=by;song.collection=songRound(Object.values(by).reduce((a,b)=>a+Math.max(0,songNum(b,0)),0));return song.collection;
+    }
+    function totalMusicBuzz(m){
+      ensureSongState(m);const vals=m.songs.filter(s=>s.released).map(s=>songClamp(s.buzz));if(!vals.length)return 0;
+      const sorted=vals.sort((a,b)=>b-a);const dim=[1,.62,.45,.34,.27,.22];let total=0;sorted.forEach((v,i)=>total+=v*(dim[i]||.18));return Math.round(songClamp(total));
+    }
+    function calculatePublicBuzz(m){
+      const recent=(gameState.industryEvents||[]).slice(-8);let score=50;
+      recent.forEach(e=>{const t=String(e&&e.title||'').toLowerCase();const a=String(e&&e.affectedEntity||'').toLowerCase();const name=String(m&&m.name||'').toLowerCase();if(a!==name&&!t.includes('public')&&!t.includes('social')&&!t.includes('viral')&&!t.includes('trailer')&&!t.includes('hype'))return;if(/viral|hype|boom|record|positive|success/.test(t))score+=5;if(/negative|controversy|postponed|backlash|failure/.test(t))score-=6;});
+      return songClamp(score);
+    }
+    function calculateIndustryBuzz(m){
+      const recent=(gameState.industryEvents||[]).slice(-8);let score=50;
+      recent.forEach(e=>{const t=String(e&&e.title||'').toLowerCase();const a=String(e&&e.affectedEntity||'').toLowerCase();const name=String(m&&m.name||'').toLowerCase();if(a!==name&&!t.includes('franchise')&&!t.includes('award')&&!t.includes('collaboration')&&!t.includes('industry'))return;if(/viral|record|major award|franchise|collaboration|positive|success/.test(t))score+=4;if(/negative|controversy|postponed|failure/.test(t))score-=5;});return songClamp(score);
+    }
+    function calculateReleaseTimingBuzz(m){
+      if(!m||!m.releaseDate)return 55;
+      const now=songNum(gameState.currentYear,2000)*52+songNum(gameState.currentWeek,1);const rel=songNum(m.releaseDate.year,gameState.currentYear)*52+songNum(m.releaseDate.week,gameState.currentWeek);const weeks=Math.max(0,rel-now);
+      if(weeks>=1&&weeks<=6)return 82;if(weeks<=0)return 72;if(weeks<=12)return 68;return 52;
+    }
+    function calculateStarBuzz(m){
+      const territories=typeof getReleasedTerritories==='function'?getReleasedTerritories(m):[];const list=territories.length?territories:['USA'];
+      const vals=list.map(t=>{const leads=typeof territoryLeadCast==='function'?territoryLeadCast(m):[];if(!leads.length)return 50;return songAvg(leads.map(a=>typeof territoryRegionalStarPower==='function'?territoryRegionalStarPower(a,t):songNum(a.starPower,50)),50);});return songClamp(songAvg(vals,50));
+    }
+    function calculateFranchiseRecognition(m){
+      if(!m||(!m.franchiseId&&!m.franchiseName))return 35;
+      const fr=(gameState.franchises||[]).find(f=>f&&f.id===m.franchiseId);
+      const recognition=songClamp(songNum(fr&&fr.popularity,65)*0.55+songNum(fr&&fr.reputation,65)*0.45);
+      return songClamp(35+recognition*0.65);
+    }
+    function calculateGenreDemand(m){
+      const genres=m&&m.genres||[];if(!genres.length)return 50;
+      let total=0;let count=0;
+      genres.forEach(g=>{const key=String(g).replace(/[-\s]/g,'').toLowerCase();const base={action:82,adventure:80,scifi:82,'sci fi':82,fantasy:80,war:84,romance:74,comedy:76,horror:78,thriller:80,drama:72,family:70,animation:76,musical:73,crime:77,mystery:77,biography:68,documentary:62}[key]||70;let trend=1;if(typeof getGenreTrendMultiplier==='function')trend=songNum(getGenreTrendMultiplier([g]),1);total+=songClamp(base+(trend-1)*60);count++;});
+      return songClamp(total/Math.max(1,count));
+    }
+    function calculateBuzz(m){
+      ensurePreReleaseState(m);ensureSongState(m);
+      const star=calculateStarBuzz(m);
+      const teaser=m.teaserScore==null?50:songNum(m.teaserScore,50);
+      const trailer=m.trailerScore==null?50:songNum(m.trailerScore,50);
+      const publicBuzz=calculatePublicBuzz(m);
+      const marketingReachValue=buzzMarketingReach(m);
+      // Marketing creates reach/opportunity, while public reaction determines
+      // whether that reach actually becomes strong buzz. This keeps spend from
+      // being an automatic hype generator.
+      const marketing=songClamp(50+(marketingReachValue-50)*0.58+(publicBuzz-50)*0.42);
+      const music=totalMusicBuzz(m);
+      const industry=calculateIndustryBuzz(m);
+      const franchise=calculateFranchiseRecognition(m);
+      const genre=calculateGenreDemand(m);
+      const timing=calculateReleaseTimingBuzz(m);
+      // Diminishing-return compression keeps any single source from becoming
+      // an unlimited hype multiplier.
+      const diminishing=x=>50+45*Math.tanh((songNum(x,50)-50)/45);
+      const score=diminishing(star)*0.18+diminishing(trailer)*0.18+diminishing(marketing)*0.15+diminishing(music)*0.12+diminishing(teaser)*0.10+diminishing(publicBuzz)*0.08+diminishing(franchise)*0.07+diminishing(genre)*0.05+diminishing(industry)*0.04+diminishing(timing)*0.03;
+      m.preReleaseBuzz=Math.round(songClamp(score));
+      m.preReleaseBuzzComponents={starBuzz:Math.round(star),teaserResponse:Math.round(teaser),trailerResponse:Math.round(trailer),marketingPromotion:Math.round(marketing),musicBuzz:Math.round(music),publicSocialBuzz:Math.round(publicBuzz),franchiseRecognition:Math.round(franchise),genreDemand:Math.round(genre),industryBuzz:Math.round(industry),releaseTiming:Math.round(timing)};
+      m.preReleaseBuzzVersion=BUZZ_VERSION;
+      return m.preReleaseBuzz;
+    }
+    function renderBuzzCard(m){
+      const host=document.getElementById('preMarketingForecastCard');if(!host||!m)return;
+      calculateBuzz(m);const c=m.preReleaseBuzzComponents||{};
+      let card=document.getElementById('preReleaseBuzzCard');if(!card){card=document.createElement('div');card.id='preReleaseBuzzCard';card.className='mkt-category-card';card.style.marginTop='1rem';host.parentNode.insertBefore(card,host.nextSibling);}
+      card.innerHTML=`<div class="mkt-category-title">📣 PRE-RELEASE BUZZ <span style="font-size:.72rem;color:#64748b;font-weight:500;">Awareness / interest — not collection</span></div><div class="rdash-stats-grid">${[['Final Buzz',m.preReleaseBuzz+'/100'],['Star Buzz',c.starBuzz+'/100'],['Trailer',c.trailerResponse+'/100'],['Marketing',c.marketingPromotion+'/100'],['Music Buzz',c.musicBuzz+'/100'],['Teaser',c.teaserResponse+'/100'],['Public / Social',c.publicSocialBuzz+'/100'],['Franchise',c.franchiseRecognition+'/100'],['Genre Demand',c.genreDemand+'/100'],['Industry',c.industryBuzz+'/100']].map(x=>`<div class="rdash-stat-card"><div class="rdash-stat-label">${x[0]}</div><div class="rdash-stat-value" style="font-size:1.15rem;">${x[1]}</div></div>`).join('')}</div><p style="margin-top:10px;color:#64748b;font-size:.82rem;">Buzz builds awareness and interest. It does not directly multiply Opening Weekend or transfer money into movie collection.</p>`;
+    }
+
+    function singerOptions(selected){return musicArtistPool().sort((a,b)=>musicAppealValue(b)-musicAppealValue(a)).slice(0,80).map(t=>`<option value="${t.id}" ${selected==String(t.id)?'selected':''}>${escapeHtml(t.name||'Artist')} · ${Math.round(musicAppealValue(t))}/100</option>`).join('');}
+    function songCardHtml(song,index,m){
+      const castOptions=['hero','heroine','villain','supporting','cameo'].flatMap(r=>(m.cast&&m.cast[r])||[]).map(t=>`<label style="display:block;margin:5px 0;"><input type="checkbox" data-song-cast="${t.id}" ${song.castIds.map(String).includes(String(t.id))?'checked':''}> ${escapeHtml(t.name||'Cast')}</label>`).join('')||'<span style="color:#64748b;">No movie cast available yet.</span>';
+      const singerRows=[0,1,2].map(i=>`<select data-song-singer="${i}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px;margin-top:6px;"><option value="">${i?'Add another singer':'Select singer'}</option>${singerOptions(song.singers[i])}</select>`).join('');
+      const budgetLabels={singerFee:'Singer Fee',musicComposition:'Music / Composition',lyrics:'Lyrics',choreographer:'Choreographer',dancers:'Dancers',location:'Location',setConstruction:'Set Construction',costumes:'Costumes',makeupStyling:'Makeup / Styling',equipment:'Equipment',productionCrew:'Production Crew',travel:'Travel',accommodation:'Accommodation',vfxPost:'VFX / Post-production',editing:'Editing',recording:'Recording',mixingMastering:'Mixing / Mastering',promotion:'Promotion',other:'Other'};
+      const budgetInputs=Object.entries(budgetLabels).map(([k,label])=>`<label style="font-size:11px;color:#475569;display:block;">${label}<input type="number" min="0" step="0.01" data-song-budget="${k}" value="${songNum(song.budget[k],0)}" style="width:100%;margin-top:4px;padding:7px;border:1px solid #cbd5e1;border-radius:7px;"></label>`).join('');
+      const langButtons=SONG_LANGUAGES.map(x=>`<button type="button" data-song-lang="${escapeHtml(x)}" style="padding:7px 9px;border:1px solid #cbd5e1;border-radius:8px;background:${song.originalLanguage===x?'#eff6ff':'#fff'};color:${song.originalLanguage===x?'#2563eb':'#334155'};cursor:pointer;">${escapeHtml(x)}</button>`).join('');
+      const dubButtons=SONG_DUBS.map(x=>`<label style="font-size:11px;margin:3px 5px 3px 0;display:inline-block;"><input type="checkbox" data-song-dub="${escapeHtml(x)}" ${song.dubbingLanguages.includes(x)?'checked':''}> ${escapeHtml(x)}</label>`).join('');
+      const countryRows=SONG_COUNTRIES.map(([c,flag])=>`<label style="display:inline-block;margin:4px 6px 4px 0;font-size:11px;"><input type="checkbox" data-song-country="${escapeHtml(c)}" ${song.releaseCountries.includes(c)?'checked':''}> ${flag} ${escapeHtml(c)}</label>`).join('');
+      const released=song.released;
+      return `<div class="mkt-category-card" data-song-card="${index}" style="margin-top:14px;${released?'border-color:#86efac;':''}"><div class="mkt-category-title">🎵 SONG ${index+1}${released?' · RELEASED':''}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;"><label style="font-size:11px;color:#475569;">Song Name<input data-song-name type="text" value="${escapeHtml(song.name)}" placeholder="Enter separate song name" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;"></label><label style="font-size:11px;color:#475569;">Song Type<select data-song-type style="width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;" ${released?'disabled':''}>${SONG_TYPES.map(x=>`<option ${song.type===x?'selected':''}>${x}</option>`).join('')}</select></label></div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">SINGERS</div>${singerRows}</div><div style="margin-top:12px;padding:10px;background:#f8fafc;border-radius:10px;"><div style="font-size:11px;font-weight:800;color:#475569;">SONG CAST — ADDITIONAL CAST FEE: ₹0 Cr</div>${castOptions}</div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">ORIGINAL LANGUAGE</div><div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;">${langButtons}</div></div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">DUBBING LANGUAGES</div>${dubButtons}</div><div style="margin-top:12px;"><div style="font-size:11px;font-weight:800;color:#475569;">COUNTRY RELEASE — UNSELECTED = ₹0 COLLECTION</div>${countryRows}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;"><label style="font-size:11px;color:#475569;">Shooting Location<input data-song-location type="text" value="${escapeHtml(song.shootingLocation)}" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;"></label><div style="font-size:11px;color:#475569;padding:9px;background:#f8fafc;border-radius:8px;">Current Song Budget<br><strong style="font-size:15px;">₹${songBudgetTotal(song).toFixed(2)} Cr</strong><br><span style="color:#64748b;">Movie cast fee is never added.</span></div></div><div style="margin-top:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">${budgetInputs}</div><div style="margin-top:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">${[['quality','Song Quality'],['musicQuality','Music Quality'],['lyricsQuality','Lyrics'],['choreography','Choreography']].map(([k,l])=>`<label style="font-size:10px;color:#475569;">${l}<input type="number" min="0" max="100" data-song-score="${k}" value="${songNum(song[k],70)}" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:7px;border:1px solid #cbd5e1;border-radius:7px;"></label>`).join('')}</div><label style="display:block;font-size:10px;color:#475569;margin-top:8px;">Song Promotion / Push <input type="number" min="0" max="100" data-song-score="promotion" value="${songNum(song.promotion,50)}" ${released?'disabled':''} style="width:100%;margin-top:4px;padding:7px;border:1px solid #cbd5e1;border-radius:7px;"></label><div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">${released?`<span class="wd-btn" style="background:#ecfdf5;border-color:#86efac;color:#166534;">Response: ${escapeHtml(song.response||'—')} · ${Math.round(song.responseScore)}/100</span><span class="wd-btn" style="background:#fdf2f8;border-color:#f9a8d4;color:#9d174d;">Song Collection: ₹${song.collection.toFixed(2)} Cr</span>`:`<button type="button" class="wd-btn" data-song-save="${index}" style="background:#2563eb;border-color:#2563eb;">SAVE SONG</button><button type="button" class="wd-btn" data-song-release="${index}" style="background:#db2777;border-color:#db2777;">RELEASE SONG</button>`}</div></div>`;
+    }
+    function syncSongFromCard(song,card){
+      song.name=card.querySelector('[data-song-name]')?.value.trim()||'';song.type=card.querySelector('[data-song-type]')?.value||'Other';song.shootingLocation=card.querySelector('[data-song-location]')?.value.trim()||'India';
+      song.singers=[...card.querySelectorAll('[data-song-singer]')].map(x=>x.value).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).slice(0,3);
+      song.castIds=[...card.querySelectorAll('[data-song-cast]:checked')].map(x=>x.getAttribute('data-song-cast'));
+      song.dubbingLanguages=[...card.querySelectorAll('[data-song-dub]:checked')].map(x=>x.getAttribute('data-song-dub'));
+      song.releaseCountries=[...card.querySelectorAll('[data-song-country]:checked')].map(x=>x.getAttribute('data-song-country'));
+      card.querySelectorAll('[data-song-budget]').forEach(x=>song.budget[x.getAttribute('data-song-budget')]=Math.max(0,songNum(x.value,0)));
+      card.querySelectorAll('[data-song-score]').forEach(x=>song[x.getAttribute('data-song-score')]=songClamp(songNum(x.value,70)));
+    }
+    function renderSongs(){const m=getActiveMovie();if(!m)return;ensureSongState(m);document.getElementById('songMovieTitle').innerText=m.name;const host=document.getElementById('songReleaseCard');host.innerHTML=`<div style="padding:12px;background:#fdf2f8;border-radius:10px;margin-bottom:10px;color:#9d174d;font-size:12px;">Each song is independent. Song Collection and Song Budget are separate from Movie Collection and Movie Budget. A country not selected below always produces ₹0 song collection in that country.</div>${m.songs.map((s,i)=>songCardHtml(s,i,m)).join('')||'<div class="mkt-category-card">No songs configured for this movie. The existing movie song-count choice remains supported; save the movie and reopen this manager to create its song entities.</div>'}`;
+      host.querySelectorAll('[data-song-card]').forEach(card=>{const i=Number(card.getAttribute('data-song-card'));card.querySelectorAll('[data-song-lang]').forEach(btn=>btn.onclick=()=>{m.songs[i].originalLanguage=btn.getAttribute('data-song-lang');renderSongs();});card.querySelector('[data-song-save]')?.addEventListener('click',()=>{syncSongFromCard(m.songs[i],card);if(!m.songs[i].name){alert('Please enter a separate song name.');return;}ensureSongSingerFee(m.songs[i]);calculateBuzz(m);renderSongs();});card.querySelector('[data-song-release]')?.addEventListener('click',()=>{syncSongFromCard(m.songs[i],card);releaseSong(m,i);});});
+    }
+    function ensureSongSingerFee(song){
+      if(!song.budget||typeof song.budget!=='object')song.budget={};
+      const calculated=song.singers.reduce((sum,id)=>{const t=singerById(id);return sum+musicFeeValue(t);},0);
+      song.budget.singerFee=songRound(calculated);
+      return song.budget.singerFee;
+    }
+    function releaseSong(m,index){const song=m.songs[index];if(!song)return;if(!song.name){alert('Please enter a separate song name.');return;}if(!song.releaseCountries.length){alert('Select at least one country for the song release. Unselected countries remain ₹0 collection.');return;}ensureSongSingerFee(song);const total=songBudgetTotal(song);if(gameState.cashOnHand<total){alert(`Insufficient cash to produce/release this song.\nSong Budget: ₹${total.toFixed(2)} Cr\nAvailable Cash: ₹${songNum(gameState.cashOnHand,0).toFixed(2)} Cr`);return;}gameState.cashOnHand-=total;calculateSongResponse(song,m);calculateSongBuzz(song,m);calculateSongCollection(song,m);song.released=true;song.releasedAt={week:gameState.currentWeek,year:gameState.currentYear};song.musicBuzzContribution=song.buzz;song.collectionByCountry=Object.fromEntries(SONG_COUNTRIES.map(([c])=>[c,Math.max(0,songNum(song.collectionByCountry[c],0))]));song.collection=songRound(Object.values(song.collectionByCountry).reduce((a,b)=>a+Math.max(0,songNum(b,0)),0));calculateBuzz(m);renderSongs();updateDashboardUI();alert(`Song released: ${song.name}\nResponse: ${song.response} (${song.responseScore}/100)\nSong Budget: ₹${total.toFixed(2)} Cr\nSong Collection: ₹${song.collection.toFixed(2)} Cr\nMusic Buzz Contribution: ${song.buzz}/100\nMovie collection was not changed.`);}
+    function songMigration(state){if(!state)return state;(state.movies||[]).forEach(m=>{ensureSongState(m);if(!m.released)calculateBuzz(m);});(state.completedMovies||[]).forEach(m=>ensureSongState(m));return state;}
+
+    // Public pre-release buzz refresh hooks. These wrappers preserve the old
+    // teaser/trailer/marketing actions and only recompute the additive buzz.
+    const oldTeaserWindow=window.runTeaserTestingAndRender;
+    window.runTeaserTestingAndRender=function(){if(oldTeaserWindow)oldTeaserWindow.apply(this,arguments);const m=getActiveMovie();if(m)calculateBuzz(m);};
+    const oldTrailerWindow=window.runTrailerTestingAndRender;
+    window.runTrailerTestingAndRender=function(){if(oldTrailerWindow)oldTrailerWindow.apply(this,arguments);const m=getActiveMovie();if(m)calculateBuzz(m);};
+    const oldConfirmMarketing=window.confirmMarketingPlan;
+    if(oldConfirmMarketing)window.confirmMarketingPlan=function(){oldConfirmMarketing.apply(this,arguments);const m=getActiveMovie();if(m)calculateBuzz(m);};
+
+    // Additive buzz display to the existing forecast screen.
+    const oldForecast=window.renderPreMarketingForecast;
+    window.renderPreMarketingForecast=function(){if(oldForecast)oldForecast.apply(this,arguments);const m=getActiveMovie();if(m){calculateBuzz(m);renderBuzzCard(m);}};
+
+    // Additive song button/display and navigation.
+    const oldUpdateDashboard=window.updateDashboardUI;
+    window.updateDashboardUI=function(){if(oldUpdateDashboard)oldUpdateDashboard.apply(this,arguments);const m=getActiveMovie();const btn=document.getElementById('activeMovieSongsBtn');if(btn){btn.style.display=(m&&((m.songCount||0)>0||((m.songs||[]).length>0)))?'inline-block':'none';}};
+    const oldShowView=window.showView;
+    window.showView=function(viewId){if(viewId==='songReleaseView'){const m=getActiveMovie();if(!m){alert('Create/select a movie first.');return;}ensureSongState(m);if(!m.songs.length){alert('This movie has no songs configured.');return;}}oldShowView.apply(this,arguments);if(viewId==='songReleaseView')renderSongs();if(viewId==='preMarketingForecastView'){const m=getActiveMovie();if(m){calculateBuzz(m);renderBuzzCard(m);}}};
+
+    // Preserve old state and initialize safe defaults without touching movie
+    // collection/accounting. Existing movies without songs remain valid.
+    const oldMigrate2=window.migrateGameStateForMultiProject;
+    if(oldMigrate2){window.migrateGameStateForMultiProject=function(state){const out=oldMigrate2(state);return songMigration(out);};}
+    songMigration(gameState);
+    (gameState.movies||[]).forEach(m=>{if(m&&!m.released)calculateBuzz(m);});
+    window.calculatePreReleaseBuzz=calculateBuzz;
+    window.totalMusicBuzz=totalMusicBuzz;
+    window.renderSongRelease=renderSongs;
+    window.releaseSong=releaseSong;
+    window.ensureSongState=ensureSongState;
+    window.updateDashboardUI();
+  })();
 })();
 
 </script>
