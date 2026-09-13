@@ -5494,21 +5494,43 @@ function boxOfficeFestivalSignal(movie, weekNumber) {
     return Math.max(0.94, Math.min(1.16, 1 + (raw - 1) * 0.60));
 }
 function boxOfficeReconcileTerritoryGrosses(breakdown, total) {
-    const entries = Object.keys(breakdown || {}).map(t => ({t, raw:Math.max(0, Number(breakdown[t].gross || 0))}));
+    // Reconciliation is strictly a rounding operation. It is never allowed
+    // to manufacture a material amount of revenue. The caller supplies a
+    // target that is already the sum of the independent territory grosses.
+    const entries = Object.keys(breakdown || {}).map(t => ({
+        t, raw: Math.max(0, Number(breakdown[t] && breakdown[t].gross || 0))
+    }));
     const targetCents = Math.max(0, Math.round(Number(total || 0) * 100));
-    const cents = entries.map(x => {
-        const rawCents = x.raw * 100;
-        const floor = Math.floor(rawCents);
-        return {t:x.t, gross:floor / 100, remainder:rawCents-floor};
+    const rounded = entries.map(x => ({
+        t: x.t,
+        gross: Math.round(x.raw * 100) / 100
+    }));
+    let usedCents = rounded.reduce((sum, x) => sum + Math.round(x.gross * 100), 0);
+    let remainingCents = targetCents - usedCents;
+    if (Math.abs(remainingCents) > 1) {
+        console.error('[Box Office Reconciliation Error] Material territory mismatch', {
+            target: Number(total || 0),
+            roundedSum: usedCents / 100,
+            difference: remainingCents / 100
+        });
+        return false;
+    }
+    if (remainingCents !== 0 && rounded.length) {
+        // Only a one-cent floating-point correction is permitted. Prefer the
+        // territory with the largest fractional remainder in the direction
+        // needed, while never exceeding the raw value by more than rounding.
+        const ranked = entries.map(x => ({
+            t: x.t, frac: x.raw * 100 - Math.floor(x.raw * 100)
+        })).sort((a,b) => remainingCents > 0 ? b.frac-a.frac : a.frac-b.frac);
+        const target = ranked[0];
+        if (target && breakdown[target.t]) {
+            breakdown[target.t].gross = Number((Number(breakdown[target.t].gross || 0) + remainingCents / 100).toFixed(2));
+        }
+    }
+    rounded.forEach(x => {
+        if (breakdown[x.t] && remainingCents === 0) breakdown[x.t].gross = x.gross;
     });
-    let used = cents.reduce((sum,x)=>sum+Math.round(x.gross*100),0);
-    let remaining = Math.max(0,targetCents-used);
-    cents.slice().sort((a,b)=>b.remainder-a.remainder).forEach(x=>{
-        if(remaining>0){x.gross=Number((x.gross+0.01).toFixed(2));remaining--;}
-    });
-    if(remaining>0&&cents.length)cents[cents.length-1].gross=Number((cents[cents.length-1].gross+remaining/100).toFixed(2));
-    cents.forEach(x=>{if(breakdown[x.t])breakdown[x.t].gross=x.gross;});
-    return breakdown;
+    return true;
 }
 function boxOfficeTicketPriceINR(territory) {
     // INR-equivalent average realized ticket price. These are economic tiers,
@@ -5638,6 +5660,138 @@ function territoryAllocationIntegrityCheck(territories, scoreEntries, grossEntri
     const grossSum = Number(grossEntries.reduce((s,x)=>s + Number(x.gross || 0),0).toFixed(2));
     return { ok: problems.length === 0 && Math.abs(grossSum - Number(total || 0)) < 0.01, problems, grossSum };
 }
+function boxOfficeDailyDemandMultiplier(movie, territory, weekNumber, dayIndex) {
+    // Daily timing is a thin layer over the existing weekly demand engine. It
+    // never creates an independent revenue path and it never changes the
+    // authoritative weekly territory gross.
+    const wom = Math.max(0, Math.min(100, Number(boxOfficeWomScore(movie) || 50)));
+    const star = Math.max(20, Math.min(100, Number(movieOpeningStarPull(movie) || 50)));
+    const hype = Math.max(25, Math.min(100, Number(boxOfficeHypeScore(movie) || 50)));
+    const genre = Math.max(0.90, Math.min(1.12, Number(boxOfficeGenreSignal(movie) || 1)));
+    const calendar = Math.max(0.90, Math.min(1.12, Number(territoryCalendarFactor(movie, territory, weekNumber) || 1)));
+    const festival = Math.max(0.94, Math.min(1.16, Number(boxOfficeFestivalSignal(movie, weekNumber) || 1)));
+
+    // Week 1 is Fri/Sat/Sun. Weekend lift is deliberately soft and depends on
+    // the movie's pre-release expectation rather than forcing Sat/Sun higher.
+    if (weekNumber === 1) {
+        const expectation = Math.max(0.78, Math.min(1.22,
+            0.78 + star * 0.0022 + hype * 0.0012 + (wom - 50) * 0.0012));
+        const openingShape = [1.00, 1.015, 1.02][dayIndex] || 1;
+        const genreWeekend = 1 + (genre - 1) * [0.15, 0.45, 0.65][dayIndex];
+        const calendarWeekend = 1 + (calendar * festival - 1) * [0.20, 0.55, 0.75][dayIndex];
+        return Math.max(0.70, Math.min(1.35, openingShape * (0.92 + expectation * 0.08) * genreWeekend * calendarWeekend));
+    }
+
+    // Week 2+ follows Mon-Sun. WOM controls how much the weekend is able to
+    // recover and how deep the weekday fall is, without multiplying gross.
+    const womNorm = (wom - 50) / 50;
+    const retention = 1 + Math.max(-0.16, Math.min(0.18, womNorm * 0.12));
+    const starHold = 1 + Math.max(-0.035, Math.min(0.045, (star - 60) * 0.0007));
+    const hypeHold = 1 + Math.max(-0.025, Math.min(0.035, (hype - 50) * 0.0006));
+    const weekdayCurve = [0.86, 0.90, 0.93, 0.96, 1.02, 1.10, 1.07];
+    const day = Math.max(0.70, Math.min(1.25, weekdayCurve[dayIndex] || 1));
+    const weekendResponsiveness = dayIndex >= 5 ? (1 + womNorm * 0.08) : (1 + womNorm * 0.025);
+    const calendarDay = 1 + (calendar * festival - 1) * (dayIndex >= 4 ? 0.55 : 0.20);
+    const genreDay = 1 + (genre - 1) * (dayIndex >= 4 ? 0.45 : 0.20);
+    return Math.max(0.60, Math.min(1.35, day * retention * starHold * hypeHold * weekendResponsiveness * calendarDay * genreDay));
+}
+
+function boxOfficeBuildDailyBreakdown(movie, territory, weekNumber, weeklyGross, info) {
+    const days = weekNumber === 1 ? 3 : 7;
+    const screens = Math.max(0, Math.round(Number(info && info.screens || 0)));
+    const showsPerDay = Math.max(0, Number(info && info.showsPerDay || 0));
+    const seats = Math.max(0, Number(info && info.seats || boxOfficeSeatsPerScreen(territory)));
+    const ticketPrice = Math.max(0, Number(info && info.ticketPrice || boxOfficeTicketPriceINR(territory)));
+    const weeklyCapacityTickets = screens * showsPerDay * seats * days;
+    const weeklyCapacityGross = weeklyCapacityTickets * ticketPrice / 10000000;
+    const targetGross = Math.max(0, Number(weeklyGross || 0));
+    const targetOccupancy = weeklyCapacityGross > 0 ? targetGross / weeklyCapacityGross : 0;
+
+    if (!Number.isFinite(targetOccupancy) || targetOccupancy < 0.08 - 0.000001 || targetOccupancy > 0.95 + 0.000001) {
+        console.error('[Box Office Daily Capacity Error]', {
+            movie: movie && movie.name, territory, week: weekNumber,
+            weeklyGross: targetGross, weeklyCapacityGross, targetOccupancy
+        });
+        return null;
+    }
+
+    const baseDemand = Math.max(0.18, Number(info && info.demandScore || 0.18));
+    const raw = Array.from({length:days}, (_, dayIndex) => {
+        const timing = boxOfficeDailyDemandMultiplier(movie, territory, weekNumber, dayIndex);
+        // Previous-week performance is already represented in the weekly demand
+        // score. It is used here only to make the daily curve less noisy.
+        const previousOcc = Number(info && info.previousOccupancy || 0);
+        const previousSignal = previousOcc > 0 ? 1 + Math.max(-0.04, Math.min(0.04, (previousOcc - 50) / 1250)) : 1;
+        return Math.max(0.05, baseDemand * timing * previousSignal);
+    });
+
+    // Convert the relative daily demand curve into daily occupancies while
+    // preserving the exact occupancy implied by the authoritative weekly
+    // gross. A bounded strength is chosen so no day needs an artificial clamp;
+    // the normalized demand curve therefore keeps its shape and its mean stays
+    // exactly equal to the weekly occupancy.
+    const mean = raw.reduce((a,b)=>a+b,0) / Math.max(1, days);
+    const normalized = raw.map(v => v / Math.max(0.000001, mean));
+    const deltas = normalized.map(v => v - 1);
+    let maxStrength = Infinity;
+    deltas.forEach(delta => {
+        if (delta > 0) maxStrength = Math.min(maxStrength, (0.95 - targetOccupancy) / delta);
+        if (delta < 0) maxStrength = Math.min(maxStrength, (targetOccupancy - 0.08) / (-delta));
+    });
+    if (!Number.isFinite(maxStrength)) maxStrength = 0.12;
+    const strength = Math.max(0, Math.min(1, maxStrength * 0.72));
+    const occupancies = normalized.map(v => Math.max(0.08, Math.min(0.95,
+        targetOccupancy + strength * (v - 1) * targetOccupancy
+    )));
+
+    const dailyCapacityTickets = screens * showsPerDay * seats;
+    const daily = occupancies.map((occupancy, dayIndex) => {
+        const tickets = dailyCapacityTickets * occupancy;
+        const gross = tickets * ticketPrice / 10000000;
+        return {
+            day: dayIndex + 1,
+            demandScore: Number((raw[dayIndex]).toFixed(6)),
+            screens,
+            showsPerDay,
+            seats,
+            occupancy: occupancy * 100,
+            tickets,
+            ticketPrice,
+            capacityTickets: dailyCapacityTickets,
+            capacityGross: dailyCapacityTickets * ticketPrice / 10000000,
+            gross
+        };
+    });
+
+    // Currency rounding is the only reconciliation permitted here. A material
+    // mismatch means the model is inconsistent and must be logged, not hidden.
+    const rounded = daily.map(d => Number(d.gross.toFixed(2)));
+    const roundedSum = Number(rounded.reduce((a,b)=>a+b,0).toFixed(2));
+    const diff = Number((targetGross - roundedSum).toFixed(2));
+    if (Math.abs(diff) > 0.01) {
+        console.error('[Box Office Daily Integrity Error]', {
+            movie: movie && movie.name, territory, week: weekNumber,
+            weeklyGross: targetGross, dailySum: roundedSum, difference: diff
+        });
+        return null;
+    }
+    if (Math.abs(diff) >= 0.01) {
+        // At most one cent is allowed, and it is applied through the last day's
+        // displayed currency value only; the underlying physical metrics are
+        // not changed. A larger correction is never permitted.
+        rounded[rounded.length - 1] = Number((rounded[rounded.length - 1] + diff).toFixed(2));
+    }
+    const finalSum = Number(rounded.reduce((a,b)=>a+b,0).toFixed(2));
+    if (Math.abs(finalSum - targetGross) > 0.01) {
+        console.error('[Box Office Daily Integrity Error] Final currency sum mismatch', {
+            movie: movie && movie.name, territory, week: weekNumber,
+            weeklyGross: targetGross, dailySum: finalSum
+        });
+        return null;
+    }
+    return {daily, dailyCollections:rounded, days, targetOccupancy, weeklyCapacityGross};
+}
+
 function allocateTerritoryWeeklyResult(movie, weekNumber, totalCollection) {
     if (!movie || movie.territoryTrackingVersion !== TERRITORY_BOX_OFFICE_VERSION) return;
     const territories = getReleasedTerritories(movie);
@@ -5659,10 +5813,18 @@ function allocateTerritoryWeeklyResult(movie, weekNumber, totalCollection) {
     if (precomputed) {
         grossEntries = territories.map(t => ({t, gross:Number((precomputed[t] && precomputed[t].gross || 0).toFixed(2))}));
         const preSum = Number(grossEntries.reduce((s,x)=>s+x.gross,0).toFixed(2));
-        if (Math.abs(preSum-total) >= 0.01 && territories.length) {
+        const mismatch = Number((preSum-total).toFixed(2));
+        // New-engine territory values are already authoritative. Reconciliation
+        // is allowed only for a tiny rounding residual; never inject a material
+        // difference into one territory.
+        if (Math.abs(mismatch) > 0.05) {
+            console.error('[Territory Allocation Error] New-engine breakdown does not match worldwide total', {
+                movie: movie.name || 'Movie', week: weekNumber, worldwide: total, territorySum: preSum, difference: mismatch
+            });
+        } else if (Math.abs(mismatch) >= 0.01 && territories.length) {
             const target = territories.slice().sort((a,b)=>(grossEntries.find(x=>x.t===b).gross||0)-(grossEntries.find(x=>x.t===a).gross||0))[0];
             const item = grossEntries.find(x=>x.t===target);
-            item.gross = Number((item.gross + total - preSum).toFixed(2));
+            if (item) item.gross = Number((item.gross - mismatch).toFixed(2));
         }
     } else {
         // Compatibility path for old/historical records: allocate only the
@@ -5682,11 +5844,27 @@ function allocateTerritoryWeeklyResult(movie, weekNumber, totalCollection) {
         const rec=movie.territoryBoxOffice[entry.t];
         const info=scoreEntries.find(x=>x.t===entry.t)||{};
         const gross=Number(entry.gross.toFixed(2));
-        const dailyPattern=weekNumber===1?[0.28,0.32,0.40]:[0.08,0.10,0.12,0.13,0.15,0.21,0.21];
-        const daily=dailyPattern.map(x=>Number((gross*x).toFixed(2)));
-        const dailyDiff=Number((gross-daily.reduce((a,b)=>a+b,0)).toFixed(2));
-        daily[daily.length-1]=Number((daily[daily.length-1]+dailyDiff).toFixed(2));
-        const weekRecord={week:weekNumber,gross,demandScore:Number((info.demandScore||info.score||0).toFixed(6)),screens:Math.max(0,Math.round(info.screens||0)),occupancy:Math.max(0,Math.min(100,Math.round(info.occupancy||0))),competition:Number((info.competition||1).toFixed(3)),wom:info.wom==null?boxOfficeWomScore(movie):info.wom,dailyCollections:daily};
+        // Historical/legacy movies keep their stored worldwide and territory
+        // numbers untouched. If an older territory record already contains a
+        // daily breakdown, preserve it verbatim; never force old revenue through
+        // the new physical-capacity model during migration.
+        const legacyMovie = movie._boxOfficeEngineVersion !== BOX_OFFICE_ENGINE_VERSION;
+        const storedLegacyWeek = legacyMovie && Array.isArray(rec.weekly) ? rec.weekly[weekNumber - 1] : null;
+        const dailyBreakdown=(!legacyMovie || !storedLegacyWeek) ? boxOfficeBuildDailyBreakdown(movie, entry.t, weekNumber, gross, {
+            demandScore:info.demandScore||info.score||0,
+            screens:info.screens,
+            occupancy:info.occupancy,
+            previousOccupancy:info.previousOccupancy,
+            showsPerDay:precomputed && precomputed[entry.t] ? precomputed[entry.t].showsPerDay : boxOfficeShowsPerDay(info.demandScore||info.score||0, weekNumber),
+            seats:precomputed && precomputed[entry.t] ? precomputed[entry.t].seats : boxOfficeSeatsPerScreen(entry.t),
+            ticketPrice:precomputed && precomputed[entry.t] ? precomputed[entry.t].ticketPrice : boxOfficeTicketPriceINR(entry.t)
+        }) : null;
+        if (!dailyBreakdown && !legacyMovie) {
+            console.error('[Box Office Daily Allocation Error]', movie.name||'Movie', weekNumber, entry.t);
+        }
+        const daily=dailyBreakdown ? dailyBreakdown.dailyCollections : (storedLegacyWeek && Array.isArray(storedLegacyWeek.dailyCollections) ? storedLegacyWeek.dailyCollections.slice() : []);
+        const dailyMetrics=dailyBreakdown ? dailyBreakdown.daily : (storedLegacyWeek && Array.isArray(storedLegacyWeek.dailyMetrics) ? storedLegacyWeek.dailyMetrics.slice() : []);
+        const weekRecord={week:weekNumber,gross,demandScore:Number((info.demandScore||info.score||0).toFixed(6)),screens:Math.max(0,Math.round(info.screens||0)),occupancy:Math.max(0,Math.min(100,Number(info.occupancy||0))),competition:Number((info.competition||1).toFixed(3)),wom:info.wom==null?boxOfficeWomScore(movie):info.wom,dailyCollections:daily,dailyMetrics};
         rec.weekly.push(weekRecord);
         rec.dailyCollections.push(...daily);
         rec.screens.push(weekRecord.screens);
@@ -5704,20 +5882,23 @@ function territoryTotalGross(movie) {
     return Number(getReleasedTerritories(movie).reduce((sum,t)=>sum + Number(movie.territoryBoxOffice[t] && movie.territoryBoxOffice[t].finalGross || 0),0).toFixed(2));
 }
 function syncTerritoryWorldwideTotal(movie) {
-    const total = territoryTotalGross(movie);
-    if (total == null) return null;
-    const authoritativeWeekly = Number(movie.cumulativeCollection || 0);
-    const diff = Number((authoritativeWeekly - total).toFixed(2));
-    if (Math.abs(diff) >= 0.01) {
-        const territories = getReleasedTerritories(movie);
-        const target = territories[territories.length - 1];
-        if (target && movie.territoryBoxOffice[target]) {
-            movie.territoryBoxOffice[target].finalGross = Number((movie.territoryBoxOffice[target].finalGross + diff).toFixed(2));
-            movie.territoryBoxOffice[target].releaseROI = Number((movie.territoryBoxOffice[target].finalGross - Number(movie.territoryBoxOffice[target].releaseCost || 0)).toFixed(2));
-        }
+    const territoryTotal = territoryTotalGross(movie);
+    if (territoryTotal == null) return null;
+    const worldwide = Number(movie.cumulativeCollection || movie.lifetimeCollection || 0);
+    const diff = Number((worldwide - territoryTotal).toFixed(2));
+    // This function is a verifier/synchronizer for display only. It must never
+    // add a large amount to a territory to make totals match.
+    if (Math.abs(diff) > 0.05) {
+        console.error('[Territory Worldwide Integrity Error]', {
+            movie: movie && movie.name, cumulative: worldwide, territoryTotal, difference: diff
+        });
+    } else if (Math.abs(diff) >= 0.01) {
+        console.warn('[Territory Worldwide Rounding Difference]', {
+            movie: movie && movie.name, cumulative: worldwide, territoryTotal, difference: diff
+        });
     }
-    movie.territoryBoxOfficeTotal = Number(territoryTotalGross(movie) || 0);
-    return territoryTotalGross(movie);
+    movie.territoryBoxOfficeTotal = Number(territoryTotal.toFixed(2));
+    return movie.territoryBoxOfficeTotal;
 }
 
 function migrateTerritoryTrackingState(state) {
@@ -7846,9 +8027,9 @@ function boxOfficeOccupancy(movie, territory, weekNumber, demand, previousOccupa
     if (weekNumber === 1) occ += 0.025;
     return Math.max(0.08, Math.min(0.95, occ));
 }
-function boxOfficeTerritoryGross(movie, territory, weekNumber, demand, globalCompetition) {
+function boxOfficeTerritoryGross(movie, territory, weekNumber, demand, competitionForDemand = 1) {
     const meta = territoryCountryProfile(territory);
-    if (!meta || !getReleasedTerritories(movie).includes(territory)) return {gross:0};
+    if (!meta || !getReleasedTerritories(movie).includes(territory)) return {gross:0, capacityGross:0};
     const previous = movie.territoryBoxOffice && movie.territoryBoxOffice[territory];
     const previousWeekly = previous && Array.isArray(previous.weekly) && previous.weekly.length ? previous.weekly[previous.weekly.length - 1] : null;
     const previousOccupancy = previousWeekly ? Number(previousWeekly.occupancy || 50) : 50;
@@ -7858,42 +8039,93 @@ function boxOfficeTerritoryGross(movie, territory, weekNumber, demand, globalCom
     const seats = boxOfficeSeatsPerScreen(territory);
     const operatingDays = weekNumber === 1 ? 3 : 7;
     const ticketPrice = boxOfficeTicketPriceINR(territory);
-    const tickets = screens * showsPerDay * seats * operatingDays * occupancy;
-    const gross = tickets * ticketPrice / 10000000 * Math.max(0.70, Math.min(1.02, globalCompetition));
-    return {gross:Math.max(0, gross), demandScore:demand, screens, occupancy:occupancy*100, tickets, ticketPrice, showsPerDay, seats, competition:globalCompetition};
+    const availableCapacity = screens * showsPerDay * seats * operatingDays;
+    const tickets = availableCapacity * occupancy;
+    // Revenue is generated exactly once from tickets sold × realized ticket
+    // price. Competition is a demand/screen headwind, never a second revenue
+    // multiplier. Therefore gross can never exceed physical capacity.
+    const capacityGross = availableCapacity * ticketPrice / 10000000;
+    const gross = Math.min(capacityGross, Math.max(0, tickets * ticketPrice / 10000000));
+    return {
+        gross:Number(gross.toFixed(6)), demandScore:demand, screens, occupancy:occupancy*100,
+        tickets, ticketPrice, showsPerDay, seats, operatingDays, availableCapacity,
+        capacityGross, competition:Number(competitionForDemand || 1)
+    };
 }
+function boxOfficeApplyControlledDemandVariance(demand, min = 0.96, max = 1.04) {
+    const d = Math.max(0, Number(demand || 0));
+    const variance = min + Math.random() * (max - min);
+    return Math.max(0.18, Math.min(1.80, d * variance));
+}
+
+function boxOfficeAssertTerritoryInvariant(movie, territory, weekNumber, result) {
+    if (!result || !getReleasedTerritories(movie).includes(territory)) return true;
+    const capacity = Number(result.availableCapacity || 0);
+    const gross = Number(result.gross || 0);
+    const tickets = Number(result.tickets || 0);
+    const occupancy = Number(result.occupancy || 0);
+    const screens = Number(result.screens || 0);
+    const baseScreens = Number((territoryCountryProfile(territory) || {}).baseScreens || 0);
+    const maxGross = Number(result.capacityGross || 0);
+    const problems = [];
+    if (gross > maxGross + 0.000001) problems.push('gross exceeds physical capacity');
+    if (tickets > capacity + 0.000001) problems.push('tickets exceed available capacity');
+    if (occupancy < -0.000001 || occupancy > 100.000001) problems.push('occupancy outside 0-100');
+    if (screens < -0.000001 || screens > baseScreens + 0.000001) problems.push('screens exceed territory baseScreens');
+    if (problems.length) {
+        console.error('[Box Office Capacity Invariant]', {
+            movie: movie && movie.name, territory, week: weekNumber, screens,
+            shows: result.showsPerDay, seats: result.seats, operatingDays: result.operatingDays,
+            occupancy, ticketPrice: result.ticketPrice, capacity, gross,
+            cumulative: Number(movie && movie.cumulativeCollection || 0),
+            territorySum: territoryTotalGross(movie), worldwide: Number(movie && movie.cumulativeCollection || 0),
+            problems
+        });
+        return false;
+    }
+    return true;
+}
+
 function calculateOpeningWeekendCollection(m) {
-    // Strict Country Release gate: no selected territory means no theatrical
-    // capacity and therefore exactly zero opening collection.
     if (!m || !getReleasedTerritories(m).length) return 0;
     const territories = getReleasedTerritories(m);
     const competition = boxOfficeCompetitionMultiplier(m);
     const breakdown = {};
-    let total = 0;
     territories.forEach(t => {
-        const demand = boxOfficeTerritoryOpeningDemand(m, t);
+        const baseDemand = boxOfficeTerritoryOpeningDemand(m, t);
+        // Competition reduces demand before capacity is converted to revenue.
+        const demand = boxOfficeApplyControlledDemandVariance(baseDemand * competition, 0.97, 1.03);
         const result = boxOfficeTerritoryGross(m, t, 1, demand, competition);
         breakdown[t] = result;
-        total += result.gross;
+        boxOfficeAssertTerritoryInvariant(m, t, 1, result);
     });
-    total *= 0.97 + Math.random() * 0.06;
-    const rounded = Number(Math.max(0, total).toFixed(2));
-    boxOfficeReconcileTerritoryGrosses(breakdown, rounded);
+    const rawTotal = territories.reduce((sum,t) => sum + Number(breakdown[t].gross || 0), 0);
+    const roundedTotal = Number(rawTotal.toFixed(2));
+    if (!boxOfficeReconcileTerritoryGrosses(breakdown, roundedTotal)) {
+        console.error('[Box Office] Opening territory reconciliation failed', m.name || 'Movie');
+    }
+    const finalTotal = Number(territories.reduce((sum,t) => sum + Number(breakdown[t].gross || 0), 0).toFixed(2));
+    territories.forEach(t => boxOfficeAssertTerritoryInvariant(m, t, 1, breakdown[t]));
     m._boxOfficeWeeklyBreakdown = {week:1, territories:breakdown, competition};
     m._boxOfficeDebug = {
-        phase:'opening', marketCapacity:territories.reduce((s,t)=>s + Number(TERRITORY_META[t].baseScreens||0) * boxOfficeSeatsPerScreen(t) * boxOfficeShowsPerDay(boxOfficeTerritoryOpeningDemand(m,t),1) * 3 * boxOfficeTicketPriceINR(t) / 10000000,0),
+        phase:'opening',
+        marketCapacity:territories.reduce((s,t)=>s + Number(breakdown[t].capacityGross || 0),0),
         starPull:movieOpeningStarPull(m), hype:boxOfficeHypeScore(m), marketing:boxOfficeMarketingScore(m),
-        qualityExpectation:moviePerformanceQuality(m), releaseReach:territories.reduce((s,t)=>s+boxOfficeReleaseReachFactor(m,t),0)/territories.length,
-        festival:boxOfficeFestivalSignal(m,1), genre:boxOfficeGenreSignal(m), franchise:territories.reduce((s,t)=>s+boxOfficeFranchiseSignal(m,t),0)/territories.length,
-        competition, openingDemand:territories.reduce((s,t)=>s+boxOfficeTerritoryOpeningDemand(m,t),0), openingGross:rounded
+        qualityExpectation:moviePerformanceQuality(m),
+        releaseReach:territories.reduce((s,t)=>s+boxOfficeReleaseReachFactor(m,t),0)/territories.length,
+        festival:boxOfficeFestivalSignal(m,1),
+        genre:boxOfficeGenreSignal(m),
+        franchise:territories.reduce((s,t)=>s+boxOfficeFranchiseSignal(m,t),0)/territories.length,
+        competition,
+        openingDemand:territories.reduce((s,t)=>s+Number(breakdown[t].demandScore || 0),0),
+        openingGross:finalTotal
     };
-    return rounded;
+    return finalTotal;
 }
+
 function calculateWeeklyCollection(m, weekNumber) {
     if (!m || weekNumber < 1) return 0;
     if (weekNumber === 1) return Number(m.openingWeekendCollection || 0);
-    // Completed/legacy movies keep their stored historical weekly values. The
-    // new engine is activated only when a movie is newly released.
     if (m._boxOfficeEngineVersion !== BOX_OFFICE_ENGINE_VERSION) {
         return Number(Array.isArray(m.weeklyCollections) ? (m.weeklyCollections[weekNumber - 1] || 0) : 0);
     }
@@ -7901,27 +8133,32 @@ function calculateWeeklyCollection(m, weekNumber) {
     if (!territories.length) return 0;
     const competition = boxOfficeCompetitionMultiplier(m);
     const breakdown = {};
-    let total = 0;
     territories.forEach(t => {
-        const demand = boxOfficeTerritoryDemand(m, t, weekNumber);
+        const baseDemand = boxOfficeTerritoryDemand(m, t, weekNumber);
+        const demand = boxOfficeApplyControlledDemandVariance(baseDemand * competition, 0.96, 1.04);
         const result = boxOfficeTerritoryGross(m, t, weekNumber, demand, competition);
         breakdown[t] = result;
-        total += result.gross;
+        boxOfficeAssertTerritoryInvariant(m, t, weekNumber, result);
     });
-    const weeklyVariance = 0.96 + Math.random() * 0.08;
-    total = Number(Math.max(0, total * weeklyVariance).toFixed(2));
-    boxOfficeReconcileTerritoryGrosses(breakdown, total);
+    const rawTotal = territories.reduce((sum,t)=>sum + Number(breakdown[t].gross || 0),0);
+    const roundedTotal = Number(rawTotal.toFixed(2));
+    if (!boxOfficeReconcileTerritoryGrosses(breakdown, roundedTotal)) {
+        console.error('[Box Office] Weekly territory reconciliation failed', m.name || 'Movie', weekNumber);
+    }
+    const finalTotal = Number(territories.reduce((sum,t)=>sum + Number(breakdown[t].gross || 0),0).toFixed(2));
+    territories.forEach(t => boxOfficeAssertTerritoryInvariant(m, t, weekNumber, breakdown[t]));
     m._boxOfficeWeeklyBreakdown = {week:weekNumber, territories:breakdown, competition};
     m._boxOfficeDebug = {
         phase:'weekly', weekNumber, audienceRating:Number(m.audienceRating||0), WOM:boxOfficeWomScore(m),
-        territoryDemand:territories.reduce((s,t)=>s+boxOfficeTerritoryDemand(m,t,weekNumber),0)/territories.length,
-        availableCapacity:territories.reduce((s,t)=>s+breakdown[t].screens*breakdown[t].showsPerDay*breakdown[t].seats*(weekNumber===1?3:7),0),
-        occupancy:territories.reduce((s,t)=>s+breakdown[t].occupancy,0)/territories.length,
-        tickets:territories.reduce((s,t)=>s+breakdown[t].tickets,0),
-        ticketPrice:territories.reduce((s,t)=>s+breakdown[t].ticketPrice,0)/territories.length,
-        weeklyGross:total, competition, retention:total/Math.max(0.0001,Number(m.openingWeekendCollection||1))
+        territoryDemand:territories.reduce((s,t)=>s+Number(breakdown[t].demandScore||0),0)/territories.length,
+        availableCapacity:territories.reduce((s,t)=>s+Number(breakdown[t].availableCapacity||0),0),
+        occupancy:territories.reduce((s,t)=>s+Number(breakdown[t].occupancy||0),0)/territories.length,
+        tickets:territories.reduce((s,t)=>s+Number(breakdown[t].tickets||0),0),
+        ticketPrice:territories.reduce((s,t)=>s+Number(breakdown[t].ticketPrice||0),0)/territories.length,
+        weeklyGross:finalTotal, competition,
+        retention:finalTotal/Math.max(0.0001,Number(m.openingWeekendCollection||1))
     };
-    return total;
+    return finalTotal;
 }
 
 /* ---------- BOX-OFFICE COMPETITION ---------- */
@@ -10158,20 +10395,15 @@ function finalizeMovieRun(m, options = {}) {
 
         m.marketRunComplete = true;
 
-        // Territory tracking is a breakdown of the existing authoritative
-        // weekly total. Synchronize it before committing lifetimeCollection,
-        // so the final worldwide value is deterministic and exact.
-        if (m.territoryTrackingVersion === TERRITORY_BOX_OFFICE_VERSION) {
-            syncTerritoryWorldwideTotal(m);
-        }
-
+        // Lifetime is the sum of the authoritative weekly worldwide values.
+        // Territory tracking is only a breakdown and is verified, never used
+        // to manufacture or replace worldwide revenue.
+        m.cumulativeCollection = Number((Array.isArray(m.weeklyCollections) ?
+            m.weeklyCollections.reduce((sum, value) => sum + safeNum(value), 0) : safeNum(m.cumulativeCollection)).toFixed(2));
         m.lifetimeCollection = safeNum(m.cumulativeCollection);
         if (m.territoryTrackingVersion === TERRITORY_BOX_OFFICE_VERSION) {
-            const territoryWorldwide = territoryTotalGross(m);
-            if (territoryWorldwide != null) {
-                m.lifetimeCollection = Number(territoryWorldwide.toFixed(2));
-            }
-            m.territoryBoxOfficeTotal = Number(m.lifetimeCollection || 0);
+            syncTerritoryWorldwideTotal(m);
+            m.territoryBoxOfficeTotal = Number(territoryTotalGross(m) || 0);
         }
 
         const previousGlobalRecord = getGlobalRecordMovie();
