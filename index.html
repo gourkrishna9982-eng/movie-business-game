@@ -633,6 +633,23 @@ body {
 .db-import-row h4 { font-size: 14px; color: #1e293b; }
 .db-import-row p { font-size: 11px; color: #64748b; }
 
+.regional-detail-btn {
+  background: rgba(245,158,11,0.14); color: #fbbf24; border: 1px solid rgba(245,158,11,0.35);
+  padding: 5px 9px; border-radius: 7px; font-size: 11px; font-weight: 800; cursor: pointer;
+  white-space: nowrap;
+}
+.regional-detail-btn:hover { background: rgba(245,158,11,0.24); border-color: rgba(245,158,11,0.55); }
+.regional-star-section { margin-top: 14px; padding: 14px 16px; border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.20); border: 1px solid var(--border-color); }
+.regional-star-title { font-size: 0.76rem; font-weight: 800; color: var(--accent-gold);
+  text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
+.regional-star-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 8px; }
+.regional-star-chip { display:flex; justify-content:space-between; gap:10px; padding:8px 10px;
+  border-radius:8px; background: rgba(255,255,255,0.045); border:1px solid rgba(255,255,255,0.07);
+  font-size: 0.78rem; color: var(--text-muted); }
+.regional-star-chip strong { color: var(--text-main); }
+.regional-star-note { font-size: 0.75rem; color: var(--text-dim); margin-top: 8px; }
+
 @media(max-width:900px){
 .grid{grid-template-columns:1fr 1fr}
 .logo{grid-column:1/3;grid-row:auto}
@@ -5150,15 +5167,73 @@ function territoryRegionalGroup(territory) {
     if (territory === 'Japan') return 'japan';
     return 'otherOverseas';
 }
-function territoryRegionalStarPower(talent, territory) {
+function territoryIndiaLanguage(movie) {
+    const key = territoryNameKey(movie && movie.originalLanguage);
+    return ['hindi','tamil','telugu','malayalam','kannada'].includes(key) ? key : null;
+}
+function regionalStarPowerContainer(talent) {
+    if (!talent || typeof talent !== 'object') return null;
+    return talent.regionalStarPower && typeof talent.regionalStarPower === 'object'
+        ? talent.regionalStarPower
+        : (talent.regionalStarpower && typeof talent.regionalStarpower === 'object' ? talent.regionalStarpower : null);
+}
+function regionalStarPowerNumber(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : null;
+}
+function territoryRegionalStarPower(talent, territory, indianLanguage = null) {
     if (!talent) return 50;
     const group = territoryRegionalGroup(territory);
-    const regional = talent.regionalStarPower || talent.regionalStarpower;
-    const value = regional && Number(regional[group]);
-    if (Number.isFinite(value)) return Math.max(0, Math.min(100, value));
+    const regional = regionalStarPowerContainer(talent);
+    let value = null;
+
+    if (group === 'india') {
+        const language = ['hindi','tamil','telugu','malayalam','kannada'].includes(String(indianLanguage || '').toLowerCase())
+            ? String(indianLanguage).toLowerCase() : null;
+        const india = regional && regional.india;
+        if (language && india && typeof india === 'object') {
+            value = regionalStarPowerNumber(india[language]);
+            if (value == null) value = regionalStarPowerNumber(india[String(language).toLowerCase()]);
+        }
+        // Compatible flat-language records are supported, but never used to
+        // replace an existing nested India language value.
+        if (value == null && language && regional) {
+            value = regionalStarPowerNumber(regional[language]);
+        }
+    } else if (regional) {
+        value = regionalStarPowerNumber(regional[group]);
+    }
+
+    // Global Star Power is only a missing-data fallback. Stored regional
+    // values are always preferred and are never overwritten.
+    if (value != null) return value;
     return Math.max(0, Math.min(100, Number(talent.starPower || 50)));
 }
-function territoryTalentAffinity(talent, territory, roleWeight = 1) {
+
+function getPersonnelRegionalStarPower(talent) {
+    const regional = regionalStarPowerContainer(talent);
+    const empty = {
+        india: {hindi:null,tamil:null,telugu:null,malayalam:null,kannada:null},
+        china:null, usa:null, russia:null, uk:null, middleEast:null,
+        southeastAsia:null, japan:null, otherOverseas:null
+    };
+    if (!regional) return empty;
+    const india = regional.india;
+    if (india && typeof india === 'object') {
+        ['hindi','tamil','telugu','malayalam','kannada'].forEach(lang => {
+            empty.india[lang] = regionalStarPowerNumber(india[lang]);
+        });
+    } else {
+        ['hindi','tamil','telugu','malayalam','kannada'].forEach(lang => {
+            empty.india[lang] = regionalStarPowerNumber(regional[lang]);
+        });
+    }
+    ['china','usa','russia','uk','middleEast','southeastAsia','japan','otherOverseas'].forEach(group => {
+        empty[group] = regionalStarPowerNumber(regional[group]);
+    });
+    return empty;
+}
+function territoryTalentAffinity(talent, territory, roleWeight = 1, indianLanguage = null) {
     if (!talent) return 1;
     const meta = territoryCountryProfile(territory);
     if (!meta) return 1;
@@ -5166,7 +5241,7 @@ function territoryTalentAffinity(talent, territory, roleWeight = 1) {
     const nationality = territoryNationalityKey(talent.nationality);
     const industryFactor = Number(meta.industryAffinity && meta.industryAffinity[industry] || 1);
     const nationalityFactor = Number(meta.nationalityAffinity && meta.nationalityAffinity[nationality] || 1);
-    const star = territoryRegionalStarPower(talent, territory) / 100;
+    const star = territoryRegionalStarPower(talent, territory, indianLanguage) / 100;
     const market = Math.max(0.45, Math.min(2.5, territoryMarketValue(talent) / 100));
     const marketAffinity = Math.max(0.55, Math.min(1.75, (industryFactor * 0.55) + (nationalityFactor * 0.45)));
     const recognition = 0.38 + Math.pow(star, 1.35) * 0.62;
@@ -5293,8 +5368,8 @@ function territoryCastMarketPower(movie, territory) {
     if (!cast.length) return 0.55;
     const contributions = cast.map(item => {
         const t = item.talent;
-        const star = territoryRegionalStarPower(t, territory) / 100;
-        const affinity = territoryTalentAffinity(t, territory, item.roleWeight);
+        const star = territoryRegionalStarPower(t, territory, territoryIndiaLanguage(movie)) / 100;
+        const affinity = territoryTalentAffinity(t, territory, item.roleWeight, territoryIndiaLanguage(movie));
         const importance = Math.pow(Math.max(0.2, item.roleWeight), 0.82);
         const quality = (
             movieTalentMetric(t.acting) * 0.34 +
@@ -5308,7 +5383,7 @@ function territoryCastMarketPower(movie, territory) {
     const diminishing = [1.00,0.68,0.50,0.38,0.30,0.25,0.21,0.18];
     let effective = 0;
     contributions.forEach((value, i) => { effective += value * (diminishing[i] || 0.16); });
-    const majorStars = cast.filter(item => territoryRegionalStarPower(item.talent, territory) >= 78).length;
+    const majorStars = cast.filter(item => territoryRegionalStarPower(item.talent, territory, territoryIndiaLanguage(movie)) >= 78).length;
     const ensembleBonus = 1 + Math.min(0.30, Math.log1p(majorStars) * 0.08);
     const leadPresence = contributions.slice(0,3).reduce((a,b)=>a+b,0);
     return Math.max(0.35, Math.min(2.75, (0.48 + effective * 0.70 + leadPresence * 0.10) * ensembleBonus));
@@ -5323,7 +5398,7 @@ function territoryDirectorWriterFactor(movie, territory) {
         const i = Number(meta && meta.industryAffinity && meta.industryAffinity[industry] || 1);
         const nat = Number(meta && meta.nationalityAffinity && meta.nationalityAffinity[nationality] || 1);
         const quality = p === movie.director ? movieDirectorQuality(movie) : movieWriterQuality(movie);
-        const star = movieTalentMetric(p.starPower);
+        const star = territoryRegionalStarPower(p, territory, territoryIndiaLanguage(movie));
         const recognition = 0.45 + star / 100 * 0.20;
         return Math.max(0.55, Math.min(1.55, 0.48 + quality / 100 * 0.34 + recognition * 0.08 + i * 0.05 + nat * 0.05));
     });
@@ -6748,6 +6823,56 @@ let currentWriterPage = 1;
 const writersPerPage = 10;
 let filteredWriters = [];
 
+function personnelRegionalTypeData(type, id, gender) {
+    const numericId = Number(id);
+    if (type === 'writer') return EMBEDDED_WRITERS_DATA.find(x => Number(x.id) === numericId) || null;
+    if (type === 'director') return EMBEDDED_DIRECTORS_DATA.find(x => Number(x.id) === numericId) || null;
+    if (type === 'actor') {
+        const pool = String(gender || '').toLowerCase() === 'female' ? EMBEDDED_ACTRESSES_DATA : EMBEDDED_ACTORS_DATA;
+        return pool.find(x => Number(x.id) === numericId) || null;
+    }
+    return null;
+}
+function regionalValueText(value) {
+    return value == null ? '—' : String(value);
+}
+function buildRegionalStarPowerHTML(talent) {
+    const r = getPersonnelRegionalStarPower(talent);
+    const regionalExists = !!regionalStarPowerContainer(talent);
+    const indiaRows = ['hindi','tamil','telugu','malayalam','kannada'].map(lang =>
+        `<div class="regional-star-chip"><span>${lang.charAt(0).toUpperCase()+lang.slice(1)}</span><strong>${regionalValueText(r.india[lang])}</strong></div>`
+    ).join('');
+    const overseas = [
+        ['China','china'],['USA','usa'],['Russia','russia'],['UK','uk'],['Middle East','middleEast'],
+        ['Southeast Asia','southeastAsia'],['Japan','japan'],['Other Overseas','otherOverseas']
+    ].map(([label,key]) => `<div class="regional-star-chip"><span>${label}</span><strong>${regionalValueText(r[key])}</strong></div>`).join('');
+    return `
+      <div class="regional-star-section">
+        <div class="regional-star-title">Regional Star Power</div>
+        <div style="font-size:0.72rem;color:var(--text-dim);margin-bottom:7px;font-weight:700;text-transform:uppercase;">India</div>
+        <div class="regional-star-grid">${indiaRows}</div>
+        <div style="font-size:0.72rem;color:var(--text-dim);margin:12px 0 7px;font-weight:700;text-transform:uppercase;">Overseas</div>
+        <div class="regional-star-grid">${overseas}</div>
+        ${regionalExists ? '' : '<div class="regional-star-note">Regional data not present on this personnel record. Box office uses Global Star Power only as a bounded fallback.</div>'}
+      </div>`;
+}
+function openPersonnelRegionalDetail(type, id, gender) {
+    const talent = personnelRegionalTypeData(type, id, gender);
+    if (!talent) return;
+    document.getElementById('historyDetailTitle').innerText = talent.name || 'Personnel Profile';
+    const detailFields = [
+        {label:'Overall Rating',value: talent.overallRating ?? '—'},
+        {label:'Global Star Power',value: talent.starPower ?? '—'},
+        {label:'Fan Base',value: talent.fanBase ?? '—'},
+        {label:'Industry',value: talent.industry ?? '—'},
+        {label:'Nationality',value: talent.nationality ?? '—'}
+    ];
+    document.getElementById('historyDetailBody').innerHTML =
+        `<div class="history-detail-grid">${detailFields.map(f => `<div class="movie-detail-item"><label>${f.label}</label><span>${f.value}</span></div>`).join('')}</div>` +
+        buildRegionalStarPowerHTML(talent);
+    document.getElementById('historyDetailModal').classList.add('show');
+}
+
 function renderWritersTable() {
     const search = document.getElementById('searchInput').value.toLowerCase();
     const ind = document.getElementById('filterIndustry').value;
@@ -6810,7 +6935,7 @@ function renderWritersTable() {
             <td>${w.experience || '10 yrs'}</td>
             <td>${w.fanBase || '10M'}</td>
             <td><span class="status-badge ${statusClass}">${w.status || 'Available'}</span></td>
-            <td><button class="btn-hire" ${w.status !== 'Available' ? 'disabled' : ''} onclick="hireWriter(${w.id})">Hire</button></td>
+            <td><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><button type="button" class="regional-detail-btn" onclick="openPersonnelRegionalDetail('writer',${w.id})">Regional Star Power</button><button class="btn-hire" ${w.status !== 'Available' ? 'disabled' : ''} onclick="hireWriter(${w.id})">Hire</button></div></td>
         `;
         tbody.appendChild(tr);
     });
@@ -6961,7 +7086,7 @@ function renderDirectorsTable() {
             <td>${d.experience || '10 yrs'}</td>
             <td>${d.fanBase || '10M'}</td>
             <td><span class="status-badge ${statusClass}">${d.status || 'Available'}</span></td>
-            <td><button class="btn-hire" ${d.status !== 'Available' ? 'disabled' : ''} onclick="hireDirector(${d.id})">Hire</button></td>
+            <td><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><button type="button" class="regional-detail-btn" onclick="openPersonnelRegionalDetail('director',${d.id})">Regional Star Power</button><button class="btn-hire" ${d.status !== 'Available' ? 'disabled' : ''} onclick="hireDirector(${d.id})">Hire</button></div></td>
         `;
         tbody.appendChild(tr);
     });
@@ -7225,7 +7350,7 @@ function renderActorsTable() {
             <td>${a.experience || '10'} yrs</td>
             <td>${a.fanBase || '10'}M</td>
             <td><span class="status-badge ${statusClass}">${a.status || 'Available'}</span></td>
-            <td><button class="btn-hire" ${disableHire ? 'disabled' : ''} onclick="castActor(${a.id}, '${a.gender}')">Cast as ${CASTING_ROLE_LABELS[currentCastingRole]}</button></td>
+            <td><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><button type="button" class="regional-detail-btn" onclick="openPersonnelRegionalDetail('actor',${a.id},'${a.gender}')">Regional Star Power</button><button class="btn-hire" ${disableHire ? 'disabled' : ''} onclick="castActor(${a.id}, '${a.gender}')">Cast as ${CASTING_ROLE_LABELS[currentCastingRole]}</button></div></td>
         `;
         tbody.appendChild(tr);
     });
@@ -8976,6 +9101,7 @@ function openProductionHouseDetail(phId) {
         <div class="movie-detail-item"><label>${f.label}</label><span>${f.value}</span></div>
     `).join('') + `</div>`;
 
+    html += buildRegionalStarPowerHTML(a.talent);
     html += `<div class="history-section-label">🎞️ Movies</div>`;
     if (s.produced.length === 0) {
         html += `<div class="movie-detail-item"><span>No completed movies yet.</span></div>`;
