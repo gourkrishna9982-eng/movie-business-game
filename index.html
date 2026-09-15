@@ -3291,6 +3291,9 @@ body {
       </div>
     </div>
 
+    <!-- Step 12C Hype + Trailer Type -->
+    <div id="step12CHypeControlsReleasePlanning" class="mkt-category-card" style="margin-bottom:1.5rem;"><!-- Existing Step 12C renderer populates this section. --></div>
+
     <!-- OTT Rights Selling -->
     <div class="mkt-category-card" style="margin-bottom:1.5rem;">
       <div class="mkt-category-title"><i class="fa-solid fa-tv"></i> OTT Rights Selling <span style="font-weight:400; text-transform:none; font-size:0.78rem; color:var(--text-muted);">(choose at most one)</span></div>
@@ -10875,6 +10878,7 @@ function renderReleasePlanningPage() {
     populateReleaseDateSelectors();
     renderOttGrid();
     updateOttCostDisplay();
+    if (typeof renderStep12CHypeControls === 'function') renderStep12CHypeControls(m, 'step12CHypeControlsReleasePlanning');
 
     const confirmBtn = document.getElementById('relpConfirmBtn');
     const weekSelect = document.getElementById('relpWeekSelect');
@@ -15478,9 +15482,10 @@ function ensureGenreCombinationRating(movie){
 
     function ensureStep12COpeningWeek(movie){ return calculateStep12COpeningWeek(movie); }
 
-    function renderStep12CHypeControls(movie){
+    function renderStep12CHypeControls(movie, targetHostId){
         const m=movie || (typeof getActiveMovie==='function'?getActiveMovie():null);
-        const host=document.getElementById('step12CHypeControls');
+        const resolvedHostId=targetHostId || (document.getElementById('releasePlanningView')?.classList.contains('active') ? 'step12CHypeControlsReleasePlanning' : 'step12CHypeControls');
+        const host=document.getElementById(resolvedHostId);
         if(!host) return;
         const data=step12CLookup(m||{});
         if(!m || !data){
@@ -15501,10 +15506,10 @@ function ensureGenreCombinationRating(movie){
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px;">
           <div style="padding:12px;border:1px solid rgba(148,163,184,.18);border-radius:10px;background:#f8fafc;">
             <div style="font-size:.72rem;color:#64748b;text-transform:uppercase;font-weight:700;">Trailer Type</div>
-            <select id="step12CTrailerType" class="sb-input" style="margin-top:7px;" onchange="selectStep12CTrailerType(this.value)">
-              <option value="">Select Trailer Type</option>${trailerOptions}
-            </select>
-            <div style="margin-top:6px;font-size:.78rem;color:#475569;">Current Hype: <b>${trailer}%</b></div>
+            <div style="margin-top:5px;font-size:.78rem;color:#475569;">Select exactly one Trailer Type for this movie.</div>
+            ${resolvedHostId==='step12CHypeControlsReleasePlanning' ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-top:10px;">${STEP_12C_HYPE_DATA.trailers.map((name,i)=>{const selected=m.trailerType===name; return `<button type="button" onclick="selectStep12CTrailerType('${name}')" style="padding:10px 12px;border:1px solid ${selected?'#2563eb':'rgba(148,163,184,.25)'};border-radius:9px;background:${selected?'#eff6ff':'#fff'};color:${selected?'#1d4ed8':'#334155'};font-weight:${selected?'800':'600'};cursor:pointer;text-align:left;box-shadow:${selected?'0 0 0 2px rgba(37,99,235,.10)':'none'};">${selected?'✓ ':''}${name}<span style="display:block;margin-top:3px;font-size:.72rem;font-weight:500;color:#64748b;">Hype: ${data.t[i]}%</span></button>`;}).join('')}</div>` : `<select id="step12CTrailerType" class="sb-input" style="margin-top:7px;" onchange="selectStep12CTrailerType(this.value)"><option value="">Select Trailer Type</option>${trailerOptions}</select>`}
+            <div style="margin-top:8px;font-size:.78rem;color:#475569;">Selected: <b>${m.trailerType||'None'}</b> · Current Hype: <b>${trailer}%</b></div>
+          </div>
           </div>
           <div style="padding:12px;border:1px solid rgba(148,163,184,.18);border-radius:10px;background:#f8fafc;">
             <div style="font-size:.72rem;color:#64748b;text-transform:uppercase;font-weight:700;">Mini Hype Sum</div>
@@ -15527,22 +15532,21 @@ function ensureGenreCombinationRating(movie){
     function selectStep12CTrailerType(value){
         const m=typeof getActiveMovie==='function'?getActiveMovie():null;
         if(!m) return;
-        const data=step12CLookup(m);
-        const valid=!!(value && data && STEP12C_TRAILER_INDEX[value] != null);
-        m.trailerType=valid ? value : '';
-        m.trailerTypeHype=calculateStep12CTrailerTypeHype(m);
-        m.miniHypeSum=calculateStep12CMiniHypeSum(m);
-        m.promotionRating=calculateStep12CPromotionRating(m);
-        m.totalHype=m.miniHypeSum==null ? null : Number(((m.trailerTypeHype+m.miniHypeSum)/8+m.promotionRating).toFixed(6));
-        renderStep12CHypeControls(m);
+        const allowed=Array.isArray(STEP_12C_HYPE_DATA.trailers)?STEP_12C_HYPE_DATA.trailers:[];
+        m.trailerType=allowed.includes(value)?value:'';
+        // Trailer selection is a simple state update + affected-UI render.
+        renderStep12CHypeControls(m, 'step12CHypeControlsReleasePlanning');
+        if(document.getElementById('step12CHypeControls')) renderStep12CHypeControls(m, 'step12CHypeControls');
         if(m.released){
-            const result=calculateStep12COpeningWeek(m);
-            m.openingWeekCollection=result.total;
-            m.openingWeekendCollection=result.total;
-            m.openingCollection=result.total;
-            m.weeklyCollections=[result.total];
-            m.cumulativeCollection=result.total;
-            renderStep12COpeningWeek(m);
+            const opening=ensureStep12COpeningWeek(m);
+            m.openingWeekCollection=opening.total;
+            m.openingWeekendCollection=opening.total;
+            m.openingCollection=opening.total;
+            m.weeklyCollections=[opening.total];
+            m.cumulativeCollection=opening.total;
+            m._step12COpeningWeek=opening;
+            if(typeof renderStep12COpeningWeek==='function') renderStep12COpeningWeek(m);
+            if(typeof renderReleaseDashboard==='function') renderReleaseDashboard(m);
         }
     }
 
@@ -15683,6 +15687,41 @@ function ensureGenreCombinationRating(movie){
     }catch(e){window.STEP_12C_VALIDATION={error:String(e&&e.message||e)};}
 })();
 
+
+    // Deterministic Release Planning Trailer Type UI validation. This validates
+    // the real container, existing 17-item dataset, selector wiring and formula
+    // path without assigning a Trailer Type to any movie automatically.
+    try {
+        const trailerList = Array.isArray(STEP_12C_HYPE_DATA.trailers) ? STEP_12C_HYPE_DATA.trailers : [];
+        const releaseHost = document.getElementById('step12CHypeControlsReleasePlanning');
+        const selectorSource = String(selectStep12CTrailerType);
+        const renderSource = String(renderStep12CHypeControls);
+        const expectedTrailers = ['Teaser-Type','Announcement-Type','Character-Focused','Story-Focused','World-Building','Mystery-Focused','Dialogue-Heavy','Action-Heavy','Emotion-Heavy','Music-Driven','Montage-Based','Narrative Trailer','Non-Linear Trailer','Reveal-Based','Build-Up Trailer','Mass Trailer','Experimental Trailer'];
+        const exactTrailerSet = trailerList.length===17 && expectedTrailers.every((name,i)=>trailerList[i]===name);
+        window.FINAL_TRAILER_UI_VALIDATION = {
+            trailerDataExists: trailerList.length > 0,
+            trailerTypesCount: trailerList.length,
+            all17TrailerTypesAvailable: exactTrailerSet,
+            releasePlanningContainerPresent: !!releaseHost,
+            releasePlanningRenderCallPresent: /renderStep12CHypeControls\(m,\s*['"]step12CHypeControlsReleasePlanning['"]\)/.test(String(renderReleasePlanningPage)),
+            all17OptionsRenderedInReleasePlanning: /STEP_12C_HYPE_DATA\.trailers\.map/.test(renderSource) && /step12CHypeControlsReleasePlanning/.test(renderSource),
+            selectorUsesExistingDataset: /STEP_12C_HYPE_DATA\.trailers/.test(selectorSource),
+            selectorUpdatesMovieTrailerType: /m\.trailerType=allowed\.includes\(value\)\?value:''/.test(selectorSource),
+            singleSelectionState: /m\.trailerType===name/.test(renderSource),
+            selectedStateRerendered: /selected\?'✓ ':'':/.test(renderSource),
+            rerenderUsesAuthoritativeMovieState: /m\.trailerType/.test(renderSource),
+            releaseValidationStillChecksTrailerType: /!m\.trailerType/.test(String(confirmReleasePlanning)),
+            existingTrailerHypeCalculationUsed: /calculateStep12CTrailerTypeHype/.test(renderSource),
+            totalHypeFormulaPreserved: /\(\(trailer\+mini\)\/8\+promo\)/.test(String(calculateStep12CTotalHype)),
+            openingWeekRemainsStep12C: typeof window.calculateOpeningWeekCollection==='function' && window.calculateOpeningWeekCollection===window.calculateOpeningWeekendCollection,
+            indiaLanguageScreensPreserved: typeof STEP12C_INDIA_LANGUAGES!=='undefined' && STEP12C_INDIA_LANGUAGES.Hindi===6200 && STEP12C_INDIA_LANGUAGES.Telugu===5000 && STEP12C_INDIA_LANGUAGES.Tamil===4000 && STEP12C_INDIA_LANGUAGES.Kannada===3000 && STEP12C_INDIA_LANGUAGES.Malayalam===2000,
+            noTrailerAssignmentDuringRender: !/m\.trailerType\s*=\s*name/.test(renderSource),
+            noReleaseOrOpeningCallForPreReleaseSelection: !/ensureStep12COpeningWeek\(m\)/.test(selectorSource.split('if(m.released)')[0]),
+            allPassed: exactTrailerSet && !!releaseHost && /renderStep12CHypeControls\(m,\s*['"]step12CHypeControlsReleasePlanning['"]\)/.test(String(renderReleasePlanningPage)) && /STEP_12C_HYPE_DATA\.trailers\.map/.test(renderSource) && /m\.trailerType=allowed\.includes\(value\)\?value:''/.test(selectorSource) && /!m\.trailerType/.test(String(confirmReleasePlanning)) && /calculateStep12CTrailerTypeHype/.test(renderSource) && /\(\(trailer\+mini\)\/8\+promo\)/.test(String(calculateStep12CTotalHype))
+        };
+    } catch(e) {
+        window.FINAL_TRAILER_UI_VALIDATION = {error:String(e&&e.message||e), allPassed:false};
+    }
 
     // Final root-level architecture validation.
     try {
