@@ -9516,11 +9516,12 @@ function populateActorFilters() {
 }
 
 function removeActorFromMovie(actorId, gender, role) {
+    const lockKey = `cast-remove:${actorId}`;
+    if (personnelHireLocks.has(lockKey)) return;
+
     const movie = getActiveMovie();
     const validRoles = ['hero','villain','heroine','supporting','cameo'];
 
-    // Only the currently active, still-live project can be modified here.
-    // Historical movies live in completedMovies and are never searched or changed.
     if(!movie || !movie.castingUnlocked || movie.marketRunComplete || movie.released || gameState.completedMovies?.some(m => m && m.id === movie.id)) {
         alert('This movie is no longer editable for casting.');
         return;
@@ -9528,97 +9529,78 @@ function removeActorFromMovie(actorId, gender, role) {
     if(!validRoles.includes(role)) return;
     if(!movie.cast || typeof movie.cast !== 'object') return;
 
-    /*
-       IMPORTANT: the movie.cast role arrays are the authoritative current-movie
-       casting state used by castActor()'s duplicate check. The previous removal
-       implementation only removed the actor from the role passed by the button.
-       That allowed stale copies of the same actor to survive in another role
-       array, so the talent could appear Available while castActor() still found
-       the old assignment.
-
-       Remove this actor by ID from EVERY current-movie role array. Do not touch
-       any other movie, completed movie, actor database record (except status),
-       salary, market value, star power, or roleCounts.
-    */
-    let removedCount = 0;
-    const removedRoles = [];
-
+    const castBefore = {};
     validRoles.forEach(currentRole => {
-        if(!Array.isArray(movie.cast[currentRole])) return;
-
-        const beforeLength = movie.cast[currentRole].length;
-        movie.cast[currentRole] = movie.cast[currentRole].filter(c => {
-            if(!c) return true;
-
-            const sameActorId = Number(c.id) === Number(actorId);
-            if(!sameActorId) return true;
-
-            // Actor IDs are the identity key for current-movie casting. Gender is
-            // intentionally NOT required here: if a stale assignment lost its
-            // gender field, it must still be removed so the duplicate check can
-            // never see a hidden assignment after removal.
-            removedCount++;
-            return false;
-        });
-
-        if(movie.cast[currentRole].length !== beforeLength) {
-            removedRoles.push(currentRole);
-        }
+        castBefore[currentRole] = Array.isArray(movie.cast[currentRole])
+            ? movie.cast[currentRole].slice()
+            : movie.cast[currentRole];
     });
-
-    if(removedCount === 0) {
-        alert('That actor is not currently assigned to this active movie.');
-        return;
-    }
-
-    // Restore ONLY the authoritative actor database record. The cast snapshots
-    // stored inside the movie have been removed; no actor record is deleted or
-    // recreated, and no financial attributes are changed.
+    const movieStatusBefore = movie.status;
     const pool = String(gender || '').toLowerCase() === 'female'
         ? EMBEDDED_ACTRESSES_DATA
         : EMBEDDED_ACTORS_DATA;
     let talent = pool.find(a => Number(a.id) === Number(actorId));
-
-    // Defensive fallback: if the button's gender was stale/missing, locate the
-    // existing database record across both original pools. This still preserves
-    // the original object; it never creates a new actor.
     if(!talent) {
         talent = [...EMBEDDED_ACTORS_DATA, ...EMBEDDED_ACTRESSES_DATA]
             .find(a => Number(a.id) === Number(actorId));
     }
+    const talentStatusBefore = talent ? talent.status : null;
 
-    if(talent) {
-        // Do not make an actor Available if the same actor is genuinely cast in
-        // another live movie. This protects the existing one-actor-one-role
-        // rule across projects. Completed/historical movies are intentionally
-        // excluded because their records are immutable history.
-        const stillCastElsewhere = (gameState.movies || []).some(otherMovie =>
-            otherMovie && otherMovie.id !== movie.id &&
-            validRoles.some(r =>
-                Array.isArray(otherMovie.cast?.[r]) &&
-                otherMovie.cast[r].some(c => Number(c?.id) === Number(actorId))
-            )
-        );
+    personnelHireLocks.add(lockKey);
+    try {
+        let removedCount = 0;
+        const removedRoles = [];
 
-        if(!stillCastElsewhere) talent.status = 'Available';
+        validRoles.forEach(currentRole => {
+            if(!Array.isArray(movie.cast[currentRole])) return;
+            const beforeLength = movie.cast[currentRole].length;
+            movie.cast[currentRole] = movie.cast[currentRole].filter(c => {
+                if(!c) return true;
+                if(Number(c.id) !== Number(actorId)) return true;
+                removedCount++;
+                return false;
+            });
+            if(movie.cast[currentRole].length !== beforeLength) removedRoles.push(currentRole);
+        });
+
+        if(removedCount === 0) {
+            return alert('That actor is not currently assigned to this active movie.');
+        }
+
+        if(talent) {
+            const stillCastElsewhere = (gameState.movies || []).some(otherMovie =>
+                otherMovie && otherMovie.id !== movie.id &&
+                validRoles.some(r =>
+                    Array.isArray(otherMovie.cast?.[r]) &&
+                    otherMovie.cast[r].some(c => Number(c?.id) === Number(actorId))
+                )
+            );
+            if(!stillCastElsewhere) talent.status = 'Available';
+        }
+
+        const castingCompleteAfterRemoval = isCastingComplete(movie);
+        if(!castingCompleteAfterRemoval && movie.status === 'Filming' && !movie.vfxUnlocked) {
+            movie.status = 'Casting';
+        }
+        void removedRoles;
+    } catch (error) {
+        validRoles.forEach(currentRole => {
+            movie.cast[currentRole] = Array.isArray(castBefore[currentRole])
+                ? castBefore[currentRole].slice()
+                : castBefore[currentRole];
+        });
+        movie.status = movieStatusBefore;
+        if(talent) talent.status = talentStatusBefore;
+        console.error('Remove Cast action failed:', error, {
+            actorId,
+            role,
+            activeMovieId: movie.id
+        });
+        alert(`Cast removal failed due to an internal error: ${error && error.message ? error.message : 'Unknown error'}. No cast state was changed.`);
+        return;
+    } finally {
+        personnelHireLocks.delete(lockKey);
     }
-
-    // Reuse the existing completion logic. roleCounts remains untouched; the
-    // role counts shown in the UI are derived from the actual cast arrays.
-    const castingCompleteAfterRemoval = isCastingComplete(movie);
-
-    // If this movie had entered Filming only because all casting slots were
-    // filled, make it casting-in-progress again. No completed/historical movie
-    // can reach this point because of the guard above.
-    if(!castingCompleteAfterRemoval && movie.status === 'Filming' && !movie.vfxUnlocked) {
-        movie.status = 'Casting';
-    }
-
-    // No refund is issued: the original hiring charge remains part of the
-    // movie's financial history, exactly as requested. The existing reactive
-    // gameState save architecture observes these movie.cast mutations and
-    // persists the updated current-movie state.
-    void removedRoles;
 
     updateDashboardUI();
     renderRoleTabs();
@@ -9626,16 +9608,24 @@ function removeActorFromMovie(actorId, gender, role) {
 }
 
 function castActor(actorId, gender) {
-    if(!getActiveMovie() || !getActiveMovie().castingUnlocked) {
+    const lockKey = `cast:${actorId}`;
+    if (personnelHireLocks.has(lockKey)) return;
+
+    const movie = getActiveMovie();
+    if(!movie || !movie.castingUnlocked) {
         alert("Casting is not available yet!");
         return;
     }
 
     const role = currentCastingRole;
-    const roleCounts = getActiveMovie().roleCounts;
-    const cast = getActiveMovie().cast;
+    const roleCounts = movie.roleCounts;
+    const cast = movie.cast;
+    if(!cast || !roleCounts || !Array.isArray(cast[role])) {
+        console.error('Cast Actor validation failed: casting role state unavailable', { actorId, role, activeMovieId: movie.id });
+        return;
+    }
 
-    if((cast[role] ? cast[role].length : 0) >= (roleCounts[role] || 0)) {
+    if(cast[role].length >= (roleCounts[role] || 0)) {
         alert(`All ${CASTING_ROLE_LABELS[role]} slots are already filled for this movie!`);
         return;
     }
@@ -9654,35 +9644,90 @@ function castActor(actorId, gender) {
     }
 
     const alreadyCast = ['hero','villain','heroine','supporting','cameo'].some(r =>
-        cast[r] && cast[r].some(c => c.id === talent.id && c.gender === talent.gender)
+        Array.isArray(cast[r]) && cast[r].some(c => c && c.id === talent.id && c.gender === talent.gender)
     );
     if(alreadyCast) {
         alert(`${talent.name} has already been cast in another role for this movie!`);
         return;
     }
 
-    let salaryNum = getLiveTalentSalaryNumber(talent);
-
-    if(gameState.cashOnHand < salaryNum) {
+    const salaryNum = getLiveTalentSalaryNumber(talent);
+    if(!Number.isFinite(salaryNum) || salaryNum < 0) {
+        console.error('Cast Actor validation failed: invalid signing cost', { actorId, role, salaryNum, activeMovieId: movie.id });
+        alert("Unable to cast this talent because the salary data is invalid.");
+        return;
+    }
+    if(!Number.isFinite(Number(gameState.cashOnHand)) || Number(gameState.cashOnHand) < salaryNum) {
         alert("Not enough cash on hand to hire this talent!");
         return;
     }
 
-    gameState.cashOnHand -= salaryNum;
-    talent.status = "Cast";
-    const castTalent = { ...talent, signedFee: salaryNum, baseMarketValue: getActorMarketState(talent).baseMarketValue, currentMarketValue: getActorMarketState(talent).currentMarketValue };
-    cast[role].push(castTalent);
-    ensureMaleActorRating(getActiveMovie());
-    ensureVillainRating(getActiveMovie());
+    personnelHireLocks.add(lockKey);
+    const cashBefore = gameState.cashOnHand;
+    const talentStatusBefore = talent.status;
+    const roleCastBefore = cast[role].slice();
+    const movieStatusBefore = movie.status;
+    const ratingStateBefore = {
+        maleActorRatings: movie.maleActorRatings,
+        maleActorRegionalStarPowerUsed: movie.maleActorRegionalStarPowerUsed,
+        maleActorRating: movie.maleActorRating,
+        maleActorRatingScale: movie.maleActorRatingScale,
+        maleActorRatingVersion: movie.maleActorRatingVersion,
+        villainRatings: movie.villainRatings,
+        villainRegionalStarPowerUsed: movie.villainRegionalStarPowerUsed,
+        villainRating: movie.villainRating,
+        villainRatingScale: movie.villainRatingScale,
+        villainRatingVersion: movie.villainRatingVersion
+    };
 
-    const castingComplete = isCastingComplete(getActiveMovie());
-    if(castingComplete) {
-        getActiveMovie().status = 'Filming';
-        alert(`Successfully cast ${talent.name} as ${CASTING_ROLE_LABELS[role]}!\n\n🎉 ALL ROLES FILLED! "${getActiveMovie().name}" has entered the 5-week Filming phase.`);
+    try {
+        gameState.cashOnHand = Number(gameState.cashOnHand) - salaryNum;
+        talent.status = "Cast";
+        const marketState = getActorMarketState(talent);
+        const castTalent = {
+            ...talent,
+            signedFee: salaryNum,
+            baseMarketValue: marketState.baseMarketValue,
+            currentMarketValue: marketState.currentMarketValue
+        };
+        cast[role].push(castTalent);
+
+        // These are the only immediate cast-role calculations. They are direct
+        // state calculations and must never trigger downstream review/BO engines.
+        ensureMaleActorRating(movie);
+        ensureVillainRating(movie);
+
+        if(isCastingComplete(movie)) movie.status = 'Filming';
+    } catch (error) {
+        gameState.cashOnHand = cashBefore;
+        talent.status = talentStatusBefore;
+        cast[role] = roleCastBefore;
+        movie.status = movieStatusBefore;
+        Object.keys(ratingStateBefore).forEach(key => {
+            movie[key] = ratingStateBefore[key];
+        });
+        console.error('Cast Actor action failed:', error, {
+            actorId,
+            actorName: talent.name,
+            role,
+            salaryNum,
+            activeMovieId: movie.id
+        });
+        alert(`Cast failed due to an internal error: ${error && error.message ? error.message : 'Unknown error'}. No salary was charged.`);
+        return;
+    } finally {
+        personnelHireLocks.delete(lockKey);
+    }
+
+    if(movie.status === 'Filming') {
+        alert(`Successfully cast ${talent.name} as ${CASTING_ROLE_LABELS[role]}!
+
+🎉 ALL ROLES FILLED! "${movie.name}" has entered the 5-week Filming phase.`);
     } else {
         alert(`Successfully cast ${talent.name} as ${CASTING_ROLE_LABELS[role]} for ${salaryNum} Cr!`);
     }
 
+    // UI only. No Step 9→12 calculation pipeline is triggered here.
     updateDashboardUI();
     renderRoleTabs();
     renderActorsTable();
@@ -10016,6 +10061,9 @@ function getPrimaryMovieVFXCompany(movie) {
 }
 
 function hireVFX(vfxId) {
+    const lockKey = `vfx:${vfxId}`;
+    if (personnelHireLocks.has(lockKey)) return;
+
     const movie = getActiveMovie();
     if(!movie || !movie.vfxUnlocked) {
         alert("VFX post-production is not available yet!");
@@ -10026,31 +10074,68 @@ function hireVFX(vfxId) {
     if(!studio || studio.status !== 'Available') return;
 
     const existingCompanies = getMovieVFXCompanies(movie);
-    if (existingCompanies.some(v => Number(v.id) === Number(vfxId))) {
+    if(existingCompanies.some(v => Number(v.id) === Number(vfxId))) {
         alert(`${studio.name} is already hired for this movie.`);
         return;
     }
 
     const costNum = parseSalaryToNumber(studio.cost);
-    if(gameState.cashOnHand < costNum) {
+    if(!Number.isFinite(costNum) || costNum < 0) {
+        console.error('Hire VFX validation failed: invalid studio cost', { vfxId, studio: studio.name, costNum, activeMovieId: movie.id });
+        alert("Unable to hire this VFX studio because the cost data is invalid.");
+        return;
+    }
+    if(!Number.isFinite(Number(gameState.cashOnHand)) || Number(gameState.cashOnHand) < costNum) {
         alert("Not enough cash on hand to hire this VFX studio!");
         return;
     }
+    if(!gameState.hiredVFX || typeof gameState.hiredVFX !== 'object') {
+        console.error('Hire VFX validation failed: gameState.hiredVFX is unavailable', { vfxId, activeMovieId: movie.id });
+        alert("Unable to hire this VFX studio because the hiring system is not ready.");
+        return;
+    }
 
-    // Preserve the existing purchase/status/budget rules, but append this
-    // different company instead of replacing the movie's previous studio.
-    gameState.cashOnHand -= costNum;
-    studio.status = "Busy";
-    gameState.hiredVFX[vfxId] = studio;
+    personnelHireLocks.add(lockKey);
+    const cashBefore = gameState.cashOnHand;
+    const studioStatusBefore = studio.status;
+    const hadHiredEntry = Object.prototype.hasOwnProperty.call(gameState.hiredVFX, vfxId);
+    const previousHiredEntry = hadHiredEntry ? gameState.hiredVFX[vfxId] : undefined;
+    const previousVfxStudios = Array.isArray(movie.vfxStudios) ? movie.vfxStudios.slice() : movie.vfxStudios;
+    const previousVfx = movie.vfx;
+    const previousContractWeeks = movie.vfxContractWeeks;
 
-    movie.vfxStudios = [...existingCompanies, studio];
-    // Compatibility pointer for older UI/save readers; the collection above
-    // is now the authoritative active hiring state.
-    movie.vfx = movie.vfxStudios[0] || null;
-    movie.vfxContractWeeks = Math.max(Number(movie.vfxContractWeeks) || 0, 4);
+    try {
+        gameState.cashOnHand = Number(gameState.cashOnHand) - costNum;
+        studio.status = "Busy";
+        gameState.hiredVFX[vfxId] = studio;
+
+        movie.vfxStudios = [...existingCompanies, studio];
+        movie.vfx = movie.vfxStudios[0] || null;
+        movie.vfxContractWeeks = Math.max(Number(movie.vfxContractWeeks) || 0, 4);
+    } catch (error) {
+        gameState.cashOnHand = cashBefore;
+        studio.status = studioStatusBefore;
+        if(hadHiredEntry) gameState.hiredVFX[vfxId] = previousHiredEntry;
+        else delete gameState.hiredVFX[vfxId];
+        movie.vfxStudios = Array.isArray(previousVfxStudios) ? previousVfxStudios.slice() : previousVfxStudios;
+        movie.vfx = previousVfx;
+        movie.vfxContractWeeks = previousContractWeeks;
+        console.error('Hire VFX action failed:', error, {
+            vfxId,
+            studioName: studio.name,
+            costNum,
+            activeMovieId: movie.id
+        });
+        alert(`VFX hire failed due to an internal error: ${error && error.message ? error.message : 'Unknown error'}. No cost was charged.`);
+        return;
+    } finally {
+        personnelHireLocks.delete(lockKey);
+    }
 
     updateDashboardUI();
-    alert(`Successfully hired ${studio.name} for ₹${costNum} Cr!\nPost-Production VFX started (4 weeks).\nTotal VFX companies hired: ${movie.vfxStudios.length}`);
+    alert(`Successfully hired ${studio.name} for ₹${costNum} Cr!
+Post-Production VFX started (4 weeks).
+Total VFX companies hired: ${movie.vfxStudios.length}`);
     showView('dashboardView');
 }
 
@@ -14587,8 +14672,7 @@ function ensureGenreCombinationRating(movie){
     }
 
     // These existing actions are the important dynamic recalculation points.
-    ['toggleGenre','toggleMovieRecommendedVfx','castActor','removeActorFromMovie',
-     'finishCompleteScript','renderReleaseDashboard'].forEach(wrapRecalc);
+    ['toggleGenre','toggleMovieRecommendedVfx','finishCompleteScript','renderReleaseDashboard'].forEach(wrapRecalc);
 
     // Migration for existing active/completed movie records. No other rating
     // engine is changed and no historical WOM/Box Office generator is enabled.
@@ -14810,8 +14894,7 @@ function ensureGenreCombinationRating(movie){
     }
 
     // Dynamic recalculation follows the existing Step 9/10 action points.
-    ['toggleGenre','toggleMovieRecommendedVfx','castActor','removeActorFromMovie',
-     'finishCompleteScript','renderReleaseDashboard'].forEach(wrapWOMRecalc);
+    ['toggleGenre','toggleMovieRecommendedVfx','finishCompleteScript','renderReleaseDashboard'].forEach(wrapWOMRecalc);
 
     const baseEnterGame = window.enterGame;
     if(typeof baseEnterGame === 'function' && !baseEnterGame.__step11WOMWrapped){
@@ -15078,8 +15161,7 @@ function ensureGenreCombinationRating(movie){
     // Keep the foundation synchronized with every existing rating/release
     // refresh point without touching the Step 11 WOM formula itself.
     const recalcNames = [
-        'toggleGenre','toggleMovieRecommendedVfx','castActor','removeActorFromMovie',
-        'finishCompleteScript','renderReleaseDashboard','releaseMovieCore'
+        'toggleGenre','toggleMovieRecommendedVfx','finishCompleteScript','renderReleaseDashboard','releaseMovieCore'
     ];
     recalcNames.forEach(name => {
         const base = window[name];
@@ -15262,22 +15344,13 @@ function ensureGenreCombinationRating(movie){
     window.renderStep12BFanFollowing=renderStep12BFanFollowing;
     window.STEP_12B_VERSION=STEP_12B_VERSION;
 
-    const recalcNames=['toggleGenre','toggleMovieRecommendedVfx','castActor','removeActorFromMovie','finishCompleteScript','renderReleaseDashboard','releaseMovieCore'];
+    const recalcNames=['toggleGenre','toggleMovieRecommendedVfx','finishCompleteScript','renderReleaseDashboard','releaseMovieCore'];
     recalcNames.forEach(name=>{
         const base=window[name];
         if(typeof base!=='function'||base.__step12BWrapped)return;
         const wrapped=function(){const result=base.apply(this,arguments);const movie=typeof getActiveMovie==='function'?getActiveMovie():null;if(movie){ensureStep12BFanFollowing(movie);renderStep12BFanFollowing(movie);}return result;};
         wrapped.__step12BWrapped=true; window[name]=wrapped;
     });
-    // If an earlier function is not wrapped yet, wrap it too. This makes the
-    // foundation resilient to load-order differences without changing logic.
-    recalcNames.forEach(name=>{
-        const base=window[name];
-        if(typeof base!=='function'||base.__step12BWrapped)return;
-        const wrapped=function(){const result=base.apply(this,arguments);const movie=typeof getActiveMovie==='function'?getActiveMovie():null;if(movie){ensureStep12BFanFollowing(movie);renderStep12BFanFollowing(movie);}return result;};
-        wrapped.__step12BWrapped=true; window[name]=wrapped;
-    });
-
     try{
         [...(gameState.movies||[]),...(gameState.completedMovies||[])].forEach(movie=>{if(movie)ensureStep12BFanFollowing(movie);});
         const active=typeof getActiveMovie==='function'?getActiveMovie():null;
@@ -15683,8 +15756,7 @@ function ensureGenreCombinationRating(movie){
     // Dynamic refresh points. No Step 1-11 formulas are changed.
     const wrapNames=[
         'toggleMarketingActivity','updateMarketingSlider','selectMarketingLevel',
-        'confirmMarketingPlan','toggleGenre','castActor','removeActorFromMovie',
-        'finishCompleteScript','renderReleaseDashboard'
+        'confirmMarketingPlan','toggleGenre','finishCompleteScript','renderReleaseDashboard'
     ];
     wrapNames.forEach(name=>{
         const base=window[name];
