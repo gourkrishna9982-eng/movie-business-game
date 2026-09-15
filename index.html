@@ -9644,6 +9644,14 @@ function toggleMovieRecommendedVfx(type) {
 
     movie.vfxRating = calculateMovieVfxRating(movie, recommendations);
     renderGenreVfxRecommendation();
+
+    // Keep the existing rating chain live immediately after a VFX selection.
+    // The recommendation selector remains the sole VFX source; Step 10 and
+    // Step 11 simply consume the updated VFX output.
+    if (typeof ensureStep10Ratings === 'function') ensureStep10Ratings(movie);
+    if (typeof ensureStep11WOM === 'function') ensureStep11WOM(movie);
+    if (typeof renderStep10AudienceSummary === 'function') renderStep10AudienceSummary(movie);
+    if (typeof renderStep11WOMSummary === 'function') renderStep11WOMSummary(movie);
     if (typeof scheduleAutoSave === 'function') scheduleAutoSave();
 }
 
@@ -14128,205 +14136,6 @@ function ensureGenreCombinationRating(movie){
     window.STEP_8B_VFX_VALIDATION = { error: String(e && e.message || e) };
   }
 })();
-</script>
-
-
-/* ============================================================================
-   STEP 11 — WOM RATING
-   NEW WOM ENGINE — authoritative formula only
-   ---------------------------------------------------------------------------
-   WOM consumes ONLY the final Step 9 Critics Rating and Step 10 Audience
-   Rating. Both are final ratings on 0–10 scales, so the authoritative formula is
-   exactly: WOM = ((Critics Rating + Audience Rating) × 10) / 2 -> 0–100.
-   No lower-level inputs, modifiers, randomness, hype, marketing, reviews, or
-   box-office logic are used here.
-   ============================================================================ */
-(function installStep11WOMEngine(){
-    const STEP_11_VERSION = 1;
-
-    function finiteWomInput(value){
-        const n = Number(value);
-        return Number.isFinite(n) ? n : null;
-    }
-
-    function calculateWOMRating(movie){
-        if(!movie) return null;
-
-        // IMPORTANT: WOM consumes only the final/current Step 9 Critics and
-        // Step 10 Audience outputs. No lower-level component is read here.
-        const criticsRating = finiteWomInput(movie.criticsRating);
-        const audienceRating = finiteWomInput(movie.audienceRating);
-
-        if(criticsRating == null || audienceRating == null){
-            movie.wordOfMouthScore = null;
-            movie.wordOfMouthScale = '0-100';
-            movie.wordOfMouthVersion = STEP_11_VERSION;
-            movie.wordOfMouth = 'Not Calculated';
-            return null;
-        }
-
-        // AUTHORITATIVE STEP 11 FORMULA — exactly two inputs, no modifiers.
-        const womRating = ((criticsRating + audienceRating) * 10) / 2;
-
-        movie.wordOfMouthScore = womRating;
-        movie.wordOfMouthScale = '0-100';
-        movie.wordOfMouthVersion = STEP_11_VERSION;
-        movie.wordOfMouth = Number(womRating.toFixed(4)).toString() + '/100';
-        return womRating;
-    }
-
-    function ensureStep11WOM(movie){
-        if(!movie) return null;
-        return calculateWOMRating(movie);
-    }
-
-    function renderStep11WOMSummary(movie){
-        const m = movie || (typeof getActiveMovie === 'function' ? getActiveMovie() : null);
-        const host = document.getElementById('step9MovieCriticsSummary');
-        if(!host) return;
-
-        let womHost = document.getElementById('step11WOMRatingSummary');
-        if(!womHost){
-            womHost = document.createElement('div');
-            womHost.id = 'step11WOMRatingSummary';
-            womHost.style.marginTop = '12px';
-            host.appendChild(womHost);
-        }
-        if(!m){ womHost.innerHTML = ''; return; }
-
-        ensureStep11WOM(m);
-        const critics = finiteWomInput(m.criticsRating);
-        const audience = finiteWomInput(m.audienceRating);
-        const wom = finiteWomInput(m.wordOfMouthScore);
-        if(critics == null || audience == null || wom == null){
-            womHost.innerHTML = `<div style="padding:12px;color:#64748b;border-top:1px solid rgba(148,163,184,.18);">WOM Rating is not available until Critics Rating and Audience Rating are complete.</div>`;
-            return;
-        }
-
-        womHost.innerHTML = `<div style="border-top:1px solid rgba(148,163,184,.18);padding-top:12px;">
-          <div class="mkt-category-title">🔥 WORD OF MOUTH (WOM)</div>
-          <div class="rdash-stats-grid">
-            <div class="rdash-stat-card"><div class="rdash-stat-label">Critics Rating</div><div class="rdash-stat-value">${critics.toFixed(2)}/10</div></div>
-            <div class="rdash-stat-card"><div class="rdash-stat-label">Audience Rating</div><div class="rdash-stat-value">${audience.toFixed(2)}/10</div></div>
-            <div class="rdash-stat-card"><div class="rdash-stat-label">WOM Rating</div><div class="rdash-stat-value">${wom.toFixed(2)}/100</div></div>
-          </div>
-          <div style="margin-top:12px;padding:12px 14px;border-radius:12px;background:#f8fafc;border:1px solid rgba(148,163,184,.18);font-size:.84rem;color:#475569;line-height:1.65;">
-            WOM = { (Critics Rating + Audience Rating) × 10 } ÷ 2<br>
-            { (${critics.toFixed(2)} + ${audience.toFixed(2)}) × 10 } ÷ 2 = ${wom.toFixed(4)}/100
-          </div>
-        </div>`;
-    }
-
-    // Final active WOM entry points. Existing compatibility names are retained
-    // only so the rest of the game can continue to call them safely.
-    window.calculateWOMRating = calculateWOMRating;
-    window.calculateWordOfMouth = calculateWOMRating;
-    window.reviewWOM = calculateWOMRating;
-    window.ensureStep11WOM = ensureStep11WOM;
-    window.STEP_11_WOM_VERSION = STEP_11_VERSION;
-
-    // Replace the Step 10 review bootstrap with a bootstrap that keeps Critics
-    // and Audience unchanged and then derives WOM strictly from their outputs.
-    window.ensureReviews = function(movie){
-        if(!movie) return movie;
-        if(typeof ensureStep9Ratings === 'function') ensureStep9Ratings(movie);
-        if(typeof ensureStep10Ratings === 'function') ensureStep10Ratings(movie);
-        ensureStep11WOM(movie);
-        return movie;
-    };
-
-    function refreshWOM(movie){
-        if(!movie) return;
-        ensureStep11WOM(movie);
-        renderStep11WOMSummary(movie);
-    }
-
-    function wrapWOMRecalc(name){
-        const base = window[name];
-        if(typeof base !== 'function' || base.__step11WOMWrapped) return;
-        const wrapped = function(){
-            const result = base.apply(this, arguments);
-            const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
-            if(movie) refreshWOM(movie);
-            return result;
-        };
-        wrapped.__step11WOMWrapped = true;
-        window[name] = wrapped;
-    }
-
-    // Dynamic recalculation follows the existing Step 9/10 action points.
-    ['toggleGenre','toggleMovieRecommendedVfx','castActor','removeActorFromMovie',
-     'hireWriter','hireDirector','finishCompleteScript','updateDashboardUI',
-     'renderReleaseDashboard'].forEach(wrapWOMRecalc);
-
-    const baseEnterGame = window.enterGame;
-    if(typeof baseEnterGame === 'function' && !baseEnterGame.__step11WOMWrapped){
-        const wrappedEnterGame = function(){
-            const result = baseEnterGame.apply(this, arguments);
-            const state = window.gameState;
-            if(state){
-                (state.movies || []).forEach(ensureStep11WOM);
-                (state.completedMovies || []).forEach(ensureStep11WOM);
-            }
-            const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
-            if(movie) renderStep11WOMSummary(movie);
-            return result;
-        };
-        wrappedEnterGame.__step11WOMWrapped = true;
-        window.enterGame = wrappedEnterGame;
-    }
-
-    // Release lifecycle: preserve the already-neutral release/Step 9/Step 10
-    // path, then derive WOM from the final Critics + Audience outputs only.
-    const baseReleaseMovieCore = window.releaseMovieCore;
-    if(typeof baseReleaseMovieCore === 'function' && !baseReleaseMovieCore.__step11WOMWrapped){
-        const wrappedRelease = function(movie){
-            const result = baseReleaseMovieCore.apply(this, arguments);
-            if(movie) refreshWOM(movie);
-            return result;
-        };
-        wrappedRelease.__step11WOMWrapped = true;
-        window.releaseMovieCore = wrappedRelease;
-    }
-
-    // Deterministic validation of Step 11 only. This does not mutate gameplay.
-    try {
-        const tests = [
-            [8,9,85],
-            [7,8,75],
-            [10,10,100],
-            [0,0,0],
-            [8.5,9.5,100],
-            [6.5,7.5,70]
-        ];
-        const results = tests.map(([critics,audience,expected]) => {
-            const m = {criticsRating:critics, audienceRating:audience};
-            const actual = calculateWOMRating(m);
-            return {critics,audience,expected,actual,pass:actual === expected};
-        });
-        window.STEP_11_VALIDATION = {
-            formula: '((Critics Rating + Audience Rating) * 10) / 2',
-            scale: '0-100',
-            results,
-            allPassed: results.every(x => x.pass),
-            deterministic: calculateWOMRating({criticsRating:8,audienceRating:9}) === calculateWOMRating({criticsRating:8,audienceRating:9}),
-            usesOnlyFinalRatings: true
-        };
-    } catch(e) {
-        window.STEP_11_VALIDATION = {error:String(e && e.message || e)};
-    }
-
-    try {
-        const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
-        if(movie){
-            ensureStep11WOM(movie);
-            renderStep11WOMSummary(movie);
-        }
-    } catch(e) {}
-})();
-
-</body>
-</html>
 
 /* ============================================================================
    STEP 10 — AUDIENCE RATING
@@ -14693,3 +14502,202 @@ function ensureGenreCombinationRating(movie){
         }
     } catch(e) {}
 })();
+
+/* ============================================================================
+   STEP 11 — WOM RATING
+   NEW WOM ENGINE — authoritative formula only
+   ---------------------------------------------------------------------------
+   WOM consumes ONLY the final Step 9 Critics Rating and Step 10 Audience
+   Rating. Both are final ratings on 0–10 scales, so the authoritative formula is
+   exactly: WOM = ((Critics Rating + Audience Rating) × 10) / 2 -> 0–100.
+   No lower-level inputs, modifiers, randomness, hype, marketing, reviews, or
+   box-office logic are used here.
+   ============================================================================ */
+(function installStep11WOMEngine(){
+    const STEP_11_VERSION = 1;
+
+    function finiteWomInput(value){
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+    }
+
+    function calculateWOMRating(movie){
+        if(!movie) return null;
+
+        // IMPORTANT: WOM consumes only the final/current Step 9 Critics and
+        // Step 10 Audience outputs. No lower-level component is read here.
+        const criticsRating = finiteWomInput(movie.criticsRating);
+        const audienceRating = finiteWomInput(movie.audienceRating);
+
+        if(criticsRating == null || audienceRating == null){
+            movie.wordOfMouthScore = null;
+            movie.wordOfMouthScale = '0-100';
+            movie.wordOfMouthVersion = STEP_11_VERSION;
+            movie.wordOfMouth = 'Not Calculated';
+            return null;
+        }
+
+        // AUTHORITATIVE STEP 11 FORMULA — exactly two inputs, no modifiers.
+        const womRating = ((criticsRating + audienceRating) * 10) / 2;
+
+        movie.wordOfMouthScore = womRating;
+        movie.wordOfMouthScale = '0-100';
+        movie.wordOfMouthVersion = STEP_11_VERSION;
+        movie.wordOfMouth = Number(womRating.toFixed(4)).toString() + '/100';
+        return womRating;
+    }
+
+    function ensureStep11WOM(movie){
+        if(!movie) return null;
+        return calculateWOMRating(movie);
+    }
+
+    function renderStep11WOMSummary(movie){
+        const m = movie || (typeof getActiveMovie === 'function' ? getActiveMovie() : null);
+        const host = document.getElementById('step9MovieCriticsSummary');
+        if(!host) return;
+
+        let womHost = document.getElementById('step11WOMRatingSummary');
+        if(!womHost){
+            womHost = document.createElement('div');
+            womHost.id = 'step11WOMRatingSummary';
+            womHost.style.marginTop = '12px';
+            host.appendChild(womHost);
+        }
+        if(!m){ womHost.innerHTML = ''; return; }
+
+        ensureStep11WOM(m);
+        const critics = finiteWomInput(m.criticsRating);
+        const audience = finiteWomInput(m.audienceRating);
+        const wom = finiteWomInput(m.wordOfMouthScore);
+        if(critics == null || audience == null || wom == null){
+            womHost.innerHTML = `<div style="padding:12px;color:#64748b;border-top:1px solid rgba(148,163,184,.18);">WOM Rating is not available until Critics Rating and Audience Rating are complete.</div>`;
+            return;
+        }
+
+        womHost.innerHTML = `<div style="border-top:1px solid rgba(148,163,184,.18);padding-top:12px;">
+          <div class="mkt-category-title">🔥 WORD OF MOUTH (WOM)</div>
+          <div class="rdash-stats-grid">
+            <div class="rdash-stat-card"><div class="rdash-stat-label">Critics Rating</div><div class="rdash-stat-value">${critics.toFixed(2)}/10</div></div>
+            <div class="rdash-stat-card"><div class="rdash-stat-label">Audience Rating</div><div class="rdash-stat-value">${audience.toFixed(2)}/10</div></div>
+            <div class="rdash-stat-card"><div class="rdash-stat-label">WOM Rating</div><div class="rdash-stat-value">${wom.toFixed(2)}/100</div></div>
+          </div>
+          <div style="margin-top:12px;padding:12px 14px;border-radius:12px;background:#f8fafc;border:1px solid rgba(148,163,184,.18);font-size:.84rem;color:#475569;line-height:1.65;">
+            WOM = { (Critics Rating + Audience Rating) × 10 } ÷ 2<br>
+            { (${critics.toFixed(2)} + ${audience.toFixed(2)}) × 10 } ÷ 2 = ${wom.toFixed(4)}/100
+          </div>
+        </div>`;
+    }
+
+    // Final active WOM entry points. Existing compatibility names are retained
+    // only so the rest of the game can continue to call them safely.
+    window.calculateWOMRating = calculateWOMRating;
+    window.calculateWordOfMouth = calculateWOMRating;
+    window.reviewWOM = calculateWOMRating;
+    window.ensureStep11WOM = ensureStep11WOM;
+    window.STEP_11_WOM_VERSION = STEP_11_VERSION;
+
+    // Replace the Step 10 review bootstrap with a bootstrap that keeps Critics
+    // and Audience unchanged and then derives WOM strictly from their outputs.
+    window.ensureReviews = function(movie){
+        if(!movie) return movie;
+        if(typeof ensureStep9Ratings === 'function') ensureStep9Ratings(movie);
+        if(typeof ensureStep10Ratings === 'function') ensureStep10Ratings(movie);
+        ensureStep11WOM(movie);
+        return movie;
+    };
+
+    function refreshWOM(movie){
+        if(!movie) return;
+        ensureStep11WOM(movie);
+        renderStep11WOMSummary(movie);
+    }
+
+    function wrapWOMRecalc(name){
+        const base = window[name];
+        if(typeof base !== 'function' || base.__step11WOMWrapped) return;
+        const wrapped = function(){
+            const result = base.apply(this, arguments);
+            const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
+            if(movie) refreshWOM(movie);
+            return result;
+        };
+        wrapped.__step11WOMWrapped = true;
+        window[name] = wrapped;
+    }
+
+    // Dynamic recalculation follows the existing Step 9/10 action points.
+    ['toggleGenre','toggleMovieRecommendedVfx','castActor','removeActorFromMovie',
+     'hireWriter','hireDirector','finishCompleteScript','updateDashboardUI',
+     'renderReleaseDashboard'].forEach(wrapWOMRecalc);
+
+    const baseEnterGame = window.enterGame;
+    if(typeof baseEnterGame === 'function' && !baseEnterGame.__step11WOMWrapped){
+        const wrappedEnterGame = function(){
+            const result = baseEnterGame.apply(this, arguments);
+            const state = window.gameState;
+            if(state){
+                (state.movies || []).forEach(ensureStep11WOM);
+                (state.completedMovies || []).forEach(ensureStep11WOM);
+            }
+            const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
+            if(movie) renderStep11WOMSummary(movie);
+            return result;
+        };
+        wrappedEnterGame.__step11WOMWrapped = true;
+        window.enterGame = wrappedEnterGame;
+    }
+
+    // Release lifecycle: preserve the already-neutral release/Step 9/Step 10
+    // path, then derive WOM from the final Critics + Audience outputs only.
+    const baseReleaseMovieCore = window.releaseMovieCore;
+    if(typeof baseReleaseMovieCore === 'function' && !baseReleaseMovieCore.__step11WOMWrapped){
+        const wrappedRelease = function(movie){
+            const result = baseReleaseMovieCore.apply(this, arguments);
+            if(movie) refreshWOM(movie);
+            return result;
+        };
+        wrappedRelease.__step11WOMWrapped = true;
+        window.releaseMovieCore = wrappedRelease;
+    }
+
+    // Deterministic validation of Step 11 only. This does not mutate gameplay.
+    try {
+        const tests = [
+            [8,9,85],
+            [7,8,75],
+            [10,10,100],
+            [0,0,0],
+            [8.5,9.5,100],
+            [6.5,7.5,70]
+        ];
+        const results = tests.map(([critics,audience,expected]) => {
+            const m = {criticsRating:critics, audienceRating:audience};
+            const actual = calculateWOMRating(m);
+            return {critics,audience,expected,actual,pass:actual === expected};
+        });
+        window.STEP_11_VALIDATION = {
+            formula: '((Critics Rating + Audience Rating) * 10) / 2',
+            scale: '0-100',
+            results,
+            allPassed: results.every(x => x.pass),
+            deterministic: calculateWOMRating({criticsRating:8,audienceRating:9}) === calculateWOMRating({criticsRating:8,audienceRating:9}),
+            usesOnlyFinalRatings: true
+        };
+    } catch(e) {
+        window.STEP_11_VALIDATION = {error:String(e && e.message || e)};
+    }
+
+    try {
+        const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
+        if(movie){
+            ensureStep11WOM(movie);
+            renderStep11WOMSummary(movie);
+        }
+    } catch(e) {}
+})();
+
+</script>
+
+</body>
+</html>
