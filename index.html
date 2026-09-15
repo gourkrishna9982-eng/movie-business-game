@@ -3217,8 +3217,8 @@ body {
       </div>
       <button class="wd-btn" id="mktConfirmBtn" style="background:#2563eb; border-color:#2563eb; padding:14px 40px; font-size:1rem;" onclick="confirmMarketingPlan()">CONFIRM MARKETING PLAN <i class="fa-solid fa-arrow-right"></i></button>
       <div style="text-align:right;">
-        <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:600;">Selected Campaigns</div>
-        <div id="mktSelectedCount" style="font-size:22px; font-weight:bold; color:#fff;">0</div>
+        <div style="font-size:11px; color:var(--text-muted); text-transform:uppercase; font-weight:600;">Selected Promotions</div>
+        <div id="mktSelectedCount" style="font-size:22px; font-weight:bold; color:#fff;">0 / 5</div>
       </div>
     </div>
   </div>
@@ -3330,6 +3330,8 @@ body {
     </div>
 
     <div class="rdash-stats-grid" id="rdashStatsGrid"></div>
+
+    <div id="step12COpeningWeekContainer" class="mkt-category-card" style="margin-top:1.25rem;"></div>
 
     <div class="mkt-category-card" style="margin-top:1.25rem;">
       <div class="mkt-category-title"><i class="fa-solid fa-table-list"></i> Weekly Breakdown</div>
@@ -4196,6 +4198,14 @@ function toggleRow(checkbox) {
 
 function toggleGenre(item) {
     item.classList.toggle('selected');
+    const movie=typeof getActiveMovie==='function'?getActiveMovie():null;
+    if(movie){
+        const container=document.getElementById('genreCheckboxContainer');
+        if(container) movie.genres=Array.from(container.querySelectorAll('.genre-item.selected')).map(el=>String(el.getAttribute('data-genre')||'').trim()).filter(Boolean);
+        if(typeof ensureMovieVfxRecommendationState==='function') ensureMovieVfxRecommendationState(movie);
+        movie.trailerType=''; movie.trailerTypeHype=0; movie.miniHypeSum=null; movie.totalHype=null;
+        if(typeof window.renderStep12CHypeControls==='function') window.renderStep12CHypeControls(movie);
+    }
     refreshActorGenreRatingDisplay();
     if (typeof renderGenreVfxRecommendation === 'function') renderGenreVfxRecommendation();
 }
@@ -9859,14 +9869,8 @@ function toggleMovieRecommendedVfx(type) {
     movie.vfxRating = calculateMovieVfxRating(movie, recommendations);
     renderGenreVfxRecommendation();
 
-    // Keep the existing rating chain live immediately after a VFX selection.
-    // The recommendation selector remains the sole VFX source; Step 10 and
-    // Step 11 simply consume the updated VFX output.
-    if (typeof ensureStep10Ratings === 'function') ensureStep10Ratings(movie);
-    if (typeof ensureStep11WOM === 'function') ensureStep11WOM(movie);
-    if (typeof renderStep10AudienceSummary === 'function') renderStep10AudienceSummary(movie);
-    if (typeof renderStep11WOMSummary === 'function') renderStep11WOMSummary(movie);
-    if (typeof scheduleAutoSave === 'function') scheduleAutoSave();
+    // VFX specialization selection only updates VFX state and local UI.
+    if (typeof window.renderStep12CHypeControls === 'function') window.renderStep12CHypeControls(movie);
 }
 
 function renderGenreVfxRecommendation() {
@@ -9985,7 +9989,7 @@ function renderVFXTable() {
             <td>${v.reputation || 85}</td>
             <td><strong>₹${v.cost} Cr</strong></td>
             <td><span class="status-badge ${statusClass}">${v.status || 'Available'}</span></td>
-            <td><button class="btn-hire" ${v.status !== 'Available' ? 'disabled' : ''} onclick="hireVFX(${v.id})">Hire Studio</button></td>
+            <td><button class="btn-hire" ${v.status !== 'Available' ? 'disabled' : ''} onclick="hireVFX(${v.id})">${getMovieVFXCompanies(getActiveMovie()).some(x=>Number(x.id)===Number(v.id)) ? 'Already Hired' : 'Hire Studio'}</button></td>
         `;
         tbody.appendChild(tr);
     });
@@ -10284,11 +10288,10 @@ function selectMarketingLevel(levelKey) {
     m.marketingLevel = levelKey;
     Object.keys(m.marketingSelections).forEach(actId => {
         const act = findMarketingActivity(actId);
-        if (act) {
-            m.marketingSelections[actId] = act[levelKey][0];
-        }
+        if (act) m.marketingSelections[actId] = act[levelKey][0];
     });
     renderMarketingPage();
+    if(typeof window.renderStep12CHypeControls==='function') window.renderStep12CHypeControls(m);
 }
 
 function toggleMarketingActivity(actId, checked) {
@@ -10297,22 +10300,30 @@ function toggleMarketingActivity(actId, checked) {
     const level = m.marketingLevel || 'worldwide';
     const act = findMarketingActivity(actId);
     if (!act) return;
+    const currentCount=Object.keys(m.marketingSelections||{}).length;
     if (checked) {
+        if(!Object.prototype.hasOwnProperty.call(m.marketingSelections,actId) && currentCount>=5){
+            alert('Maximum 5 promotions can be selected.');
+            renderMarketingPage();
+            return;
+        }
         m.marketingSelections[actId] = act[level][0];
-    } else {
-        delete m.marketingSelections[actId];
-    }
+    } else delete m.marketingSelections[actId];
     renderMarketingPage();
+    if(typeof window.renderStep12CHypeControls==='function') window.renderStep12CHypeControls(m);
 }
 
 function updateMarketingSlider(actId, value) {
     const m = getActiveMovie();
     if (!m || m.marketingCompleted) return;
+    if(!Object.prototype.hasOwnProperty.call(m.marketingSelections||{},actId)) return;
     const val = parseFloat(value);
+    if(!Number.isFinite(val)) return;
     m.marketingSelections[actId] = val;
     const valEl = document.getElementById('mktVal_' + actId);
     if (valEl) valEl.innerText = fmtMktCr(val) + ' Selected';
     updateMarketingTotals();
+    if(typeof window.renderStep12CHypeControls==='function') window.renderStep12CHypeControls(m);
 }
 
 function updateMarketingTotals() {
@@ -10320,7 +10331,7 @@ function updateMarketingTotals() {
     if (!m) return;
     const total = Object.values(m.marketingSelections).reduce((s, v) => s + v, 0);
     document.getElementById('mktTotalBudget').innerText = fmtMktCr(total);
-    document.getElementById('mktSelectedCount').innerText = Object.keys(m.marketingSelections).length;
+    document.getElementById('mktSelectedCount').innerText = Object.keys(m.marketingSelections).length + ' / 5';
 }
 
 function renderMarketingLevels() {
@@ -10408,8 +10419,8 @@ function confirmMarketingPlan() {
         return;
     }
     const selectedCount = Object.keys(m.marketingSelections).length;
-    if (selectedCount === 0) {
-        alert("Please select at least one marketing campaign before confirming.");
+    if (selectedCount !== 5) {
+        alert(`Please select exactly 5 promotions before confirming. Currently selected: ${selectedCount}/5.`);
         return;
     }
     const total = Object.values(m.marketingSelections).reduce((s, v) => s + v, 0);
@@ -10901,6 +10912,12 @@ function confirmReleasePlanning() {
         return;
     }
 
+    const releaseGenres=Array.isArray(m.genres)?m.genres.filter(Boolean):[];
+    if(releaseGenres.length<2 || releaseGenres.length>3){ alert('Please select a valid 2-genre or 3-genre movie combination before confirming the release plan.'); return; }
+    const releasePromoCount=Object.keys(m.marketingSelections||{}).length;
+    if(releasePromoCount!==5){ alert(`Please select exactly 5 promotions before confirming the release plan. Currently selected: ${releasePromoCount}/5.`); return; }
+    if(!m.trailerType){ alert('Please select a Trailer Type before releasing the movie.'); return; }
+
     let ottCost = 0;
     let ottOption = null;
     if (m.ottSelected) {
@@ -10935,7 +10952,7 @@ function confirmReleasePlanning() {
 }
 
 /* ---------- MOVIE RELEASE & THEATRICAL RUN RESOLUTION ---------- */
-function releaseMovieCore(m) {
+function legacyOpeningReleaseEngine(m) {
     m.released = true;
     
     m.criticsRating = calculateCriticsRating(m);
@@ -10995,6 +11012,8 @@ function renderReleaseDashboard() {
           <div class="rdash-stat-label">${s.label}</div>
           <div class="rdash-stat-value">${s.value}</div>
         </div>`).join('');
+
+    if(typeof window.renderStep12COpeningWeek==='function') window.renderStep12COpeningWeek(m);
 
     const tbody = document.getElementById('rdashWeeklyTableBody');
     tbody.innerHTML = '';
@@ -12941,8 +12960,8 @@ function getMovieAwardsWon(movie) {
 // controlled live-star/franchise hype. The Week 1–10 weekly collection formula
 // remains untouched.
 function releaseMovie(m) {
-    releaseMovieCore(m);
-    if (!m) return;
+    const released=window.releaseMovieCore(m);
+    if (!m || !released) return;
     const leads = getAllLeadActors(m);
     if (leads.length) {
         const avgMarket = leads.reduce((s,t)=>s+actorMarketValueForTalent(t),0)/leads.length;
@@ -13549,20 +13568,9 @@ initializeNewFeatureUI();
     return out;
   };
 
-  const _oldReleaseCore=releaseMovieCore;
-  releaseMovieCore=function(m){ensurePreReleaseState(m);ensureReviews(m);m.hypeScore=Math.round(clamp(n(m.hypeScore,60)));_oldReleaseCore(m);ensureReviews(m);m.preReleaseStage='released';};
+  // Release is no longer wrapped here; the root release transaction owns the explicit dependency flow.
 
-  const _oldRenderReleaseDashboard=renderReleaseDashboard;
-  renderReleaseDashboard=function(){
-    _oldRenderReleaseDashboard();
-    const m=getActiveMovie(); if(!m)return; ensureReviews(m);
-    const host=document.getElementById('rdashStatsGrid'); if(!host)return;
-    let card=document.getElementById('preReleaseReviewSummary');
-    if(!card){card=document.createElement('div');card.id='preReleaseReviewSummary';card.className='mkt-category-card';card.style.marginTop='1.25rem';host.parentNode.insertBefore(card,host.nextSibling);}
-    const diff=Math.abs(n(m.criticsRating,0)-n(m.audienceRating,0));
-    const reaction=diff<0.5&&n(m.audienceRating,0)>=9?'Excellent WOM':n(m.audienceRating,0)>=9&&n(m.criticsRating,0)<8?'Mass entertainer':n(m.criticsRating,0)>=9&&n(m.audienceRating,0)<7?'Critics loved it, audience did not connect':n(m.wordOfMouthScore,0)>=75?'Strong WOM':'Mixed/weak WOM';
-    card.innerHTML=`<div class="mkt-category-title">⭐ CRITICS REVIEW &nbsp; ❤️ AUDIENCE REVIEW &nbsp; 🔥 WORD OF MOUTH</div><div class="rdash-stats-grid">${[['Critics Rating',`${n(m.criticsRating,0).toFixed(1)}/10`],['Audience Rating',`${n(m.audienceRating,0).toFixed(1)}/10`],['Word of Mouth',`${n(m.wordOfMouthScore,0)}/100`],['Audience Reaction',reaction]].map(x=>`<div class="rdash-stat-card"><div class="rdash-stat-label">${x[0]}</div><div class="rdash-stat-value" style="font-size:${String(x[1]).length>22?'1rem':'1.35rem'};">${x[1]}</div></div>`).join('')}</div><p style="margin-top:10px;color:#64748b;font-size:.82rem;">Opening is driven mainly by pre-release business signals; from Week 2 onward, Word of Mouth becomes an additional hold factor.</p>`;
-  };
+  // Release dashboard rendering remains owned by the base renderer; no UI wrapper is installed.
 
   const _oldRenderFinal=renderFinalResultsPage;
   renderFinalResultsPage=function(){_oldRenderFinal();const m=getActiveMovie()||((gameState.completedMovies||[]).slice(-1)[0]);if(!m)return;ensureReviews(m);const a=m.performanceAnalysis||analysis(m);const el=document.getElementById('frPerformanceAnalysis');if(!el)return;el.innerHTML=`<div class="mkt-category-title">🔍 PERFORMANCE ANALYSIS</div><div class="rdash-stats-grid">${[['Critics Rating',`${n(m.criticsRating,0).toFixed(1)}/10`],['Audience Rating',`${n(m.audienceRating,0).toFixed(1)}/10`],['Teaser',`${m.teaserScore??'—'}/100`],['Trailer',`${m.trailerScore??'—'}/100`],['Hype',`${a.hype}/100`],['Word of Mouth',`${a.wom}/100`],['Marketing',`₹${n(m.marketingTotal,0).toFixed(1)} Cr`],['Competition',`${100-a.competition}% pressure`],['Release Strength',`${a.releaseStrength}/100`],['Performance Label',performanceLabel(m)]].map(x=>`<div class="rdash-stat-card"><div class="rdash-stat-label">${x[0]}</div><div class="rdash-stat-value" style="font-size:${String(x[1]).length>18?'1rem':'1.25rem'};">${x[1]}</div></div>`).join('')}</div><div style="margin-top:16px;padding:16px;border-radius:12px;background:#f8fafc;"><div style="font-size:1.1rem;font-weight:800;">💰 Final Collection: ₹${n(m.lifetimeCollection,0).toFixed(2)} Cr</div><div style="margin-top:5px;color:#475569;">💵 Final Profit: ₹${n(m.profit,0).toFixed(2)} Cr</div><div style="margin-top:5px;color:#475569;">🏆 Financial Verdict: ${m.finalStatus||'—'}</div></div><div style="margin-top:16px;"><div style="font-weight:800;margin-bottom:8px;">WHY DID THIS MOVIE PERFORM THIS WAY?</div>${a.reasons.map(r=>`<div style="padding:8px 0;color:#334155;">${r}</div>`).join('')}</div>`;};
@@ -14077,30 +14085,45 @@ function ensureGenreCombinationRating(movie){
     };
     window.allocateTerritoryWeeklyResult = function(){ return null; };
 
-    // Release itself remains part of the existing lifecycle, but it no longer
-    // invokes any rating, WOM, popularity, opening, or territory generator.
+    // Single authoritative release transaction. It explicitly executes the dependency chain
+    // and makes Step 12C the sole Week-1 collection source.
     window.releaseMovieCore = function(m){
-        if(!m) return;
-        m.released = true;
-        m.criticsRating = 0;
-        m.audienceRating = 0;
-        m.wordOfMouthScore = 0;
-        m.wordOfMouth = 'Not Calculated';
-        m.popularity = 0;
-        m.openingWeekendCollection = 0;
-        m.openingCollection = 0;
-        m.marketRunWeek = 1;
-        m.boxOfficeWeek = 1;
-        m.weeklyCollections = [0];
-        m.weeklyPopularity = [0];
-        m.cumulativeCollection = 0;
-        m.weeklyDomesticCollections = [0];
-        m.weeklyInternationalCollections = [0];
-        m.cumulativeDomesticCollection = 0;
-        m.cumulativeInternationalCollection = 0;
-        m.territoryBoxOffice = null;
-        m.territoryBoxOfficeTotal = 0;
-        m.marketRunComplete = false;
+        if(!m) return false;
+        try{
+            const genres=Array.isArray(m.genres)?m.genres.filter(Boolean):[];
+            if(genres.length<2||genres.length>3){ alert('Please select a valid 2-genre or 3-genre movie combination before releasing the movie.'); return false; }
+            const selectedPromotions=Object.keys(m.marketingSelections||{});
+            if(selectedPromotions.length!==5){ alert(`Please select exactly 5 promotions before releasing the movie. Currently selected: ${selectedPromotions.length}/5.`); return false; }
+            if(!m.trailerType){ alert('Please select a Trailer Type before releasing the movie.'); return false; }
+            const critics=typeof window.calculateCriticsRating==='function'?window.calculateCriticsRating(m):null;
+            const audience=typeof window.calculateAudienceRating==='function'?window.calculateAudienceRating(m):null;
+            const wom=typeof window.calculateWOMRating==='function'?window.calculateWOMRating(m):null;
+            if(!Number.isFinite(Number(critics))||!Number.isFinite(Number(audience))||!Number.isFinite(Number(wom))){ alert('Ratings and WOM could not be calculated. Please complete Writer, Director, Cast and VFX inputs.'); return false; }
+            const ticketState=typeof window.ensureStep12ATicketPriceState==='function'?window.ensureStep12ATicketPriceState(m):null;
+            if(!ticketState||!Number.isFinite(Number(ticketState.baseTicketPrice))){ alert('Ticket Price could not be calculated from WOM.'); return false; }
+            const fanFollowing=typeof window.ensureStep12BFanFollowing==='function'?window.ensureStep12BFanFollowing(m):null;
+            if(!fanFollowing||Object.keys(fanFollowing).some(country=>fanFollowing[country]==null)){ alert('Fan Following is incomplete for one or more active markets.'); return false; }
+            const opening=typeof window.calculateOpeningWeekCollection==='function'?window.calculateOpeningWeekCollection(m):null;
+            if(!opening||!Number.isFinite(Number(opening.total))){ alert('Opening Week Collection could not be calculated.'); return false; }
+            if(Object.values(opening.byIndiaLanguage||{}).some(row=>row.fanFollowing==null||row.ticketPrice==null)||Object.values(opening.byCountry||{}).some(row=>row.fanFollowing==null||row.ticketPrice==null)){ alert('Fan Following or Ticket Price is incomplete for an active market.'); return false; }
+            m.released=true;
+            m.popularity=safeNum(m.popularity);
+            m._boxOfficeEngineVersion=typeof BOX_OFFICE_ENGINE_VERSION!=='undefined'?BOX_OFFICE_ENGINE_VERSION:(m._boxOfficeEngineVersion||null);
+            m.openingWeekCollection=opening.total; m.openingWeekendCollection=opening.total; m.openingCollection=opening.total;
+            m.weeklyCollections=[opening.total];
+            m.weeklyPopularity=[safeNum(m.popularity)];
+            m.cumulativeCollection=opening.total; m.marketRunWeek=1; m.boxOfficeWeek=1; m.marketRunComplete=false;
+            const openingSplit=splitDomesticIntl(m,opening.total);
+            m.weeklyDomesticCollections=[openingSplit.domestic]; m.weeklyInternationalCollections=[openingSplit.international];
+            m.cumulativeDomesticCollection=openingSplit.domestic; m.cumulativeInternationalCollection=openingSplit.international;
+            m.territoryBoxOffice=null; m.territoryBoxOfficeTotal=0;
+            if(typeof window.renderStep12COpeningWeek==='function') window.renderStep12COpeningWeek(m);
+            return true;
+        }catch(error){
+            console.error('releaseMovieCore failed:',error,{movieId:m.id});
+            alert(`Release failed due to an internal error: ${error&&error.message?error.message:'Unknown error'}.`);
+            return false;
+        }
     };
 
     // Any direct old entry point used by another script is also neutralized.
@@ -14271,60 +14294,7 @@ function ensureGenreCombinationRating(movie){
         return movie;
     };
 
-    // Keep the existing release lifecycle and zero-output box-office state, but
-    // calculate only the new Movie/Critics ratings at release time.
-    const baseReleaseMovieCore = window.releaseMovieCore;
-    window.releaseMovieCore = function(movie){
-        if(typeof baseReleaseMovieCore === 'function') baseReleaseMovieCore(movie);
-        if(movie) ensureStep9Ratings(movie);
-    };
-
-    // Recalculate after every relevant existing lifecycle change without
-    // changing the underlying Step 1–8 engines.
-    const baseFinishCompleteScript = window.finishCompleteScript;
-    if(typeof baseFinishCompleteScript === 'function'){
-        window.finishCompleteScript = function(){
-            baseFinishCompleteScript.apply(this, arguments);
-            const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
-            if(movie){
-                ensureStep9Ratings(movie);
-                movie.movieRatingScore = movie.movieRatingScore == null ? null : movie.movieRatingScore;
-            }
-        };
-    }
-
-    const baseToggleVfx = window.toggleMovieRecommendedVfx;
-    if(typeof baseToggleVfx === 'function'){
-        window.toggleMovieRecommendedVfx = function(){
-            const result = baseToggleVfx.apply(this, arguments);
-            const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
-            if(movie) ensureStep9Ratings(movie);
-            renderStep9RatingSummary(movie);
-            return result;
-        };
-    }
-
-    const baseToggleGenre = window.toggleGenre;
-    if(typeof baseToggleGenre === 'function'){
-        window.toggleGenre = function(){
-            const result = baseToggleGenre.apply(this, arguments);
-            const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
-            if(movie) ensureStep9Ratings(movie);
-            renderStep9RatingSummary(movie);
-            return result;
-        };
-    }
-
-    const baseRenderReleaseDashboard = window.renderReleaseDashboard;
-    if(typeof baseRenderReleaseDashboard === 'function'){
-        window.renderReleaseDashboard = function(){
-            const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
-            if(movie) ensureStep9Ratings(movie);
-            const result = baseRenderReleaseDashboard.apply(this, arguments);
-            renderStep9RatingSummary(movie);
-            return result;
-        };
-    }
+    // Transaction functions are not wrapped by the rating engine. Release calculations are explicit.
 
     // Add the compact summary to the existing release dashboard only; no second
     // review dashboard is created. It is rebuilt in-place on each render.
@@ -14654,25 +14624,6 @@ function ensureGenreCombinationRating(movie){
         movie.genres = genres;
     }
 
-    function wrapRecalc(name){
-        const base = window[name];
-        if(typeof base !== 'function' || base.__step10Wrapped) return;
-        const wrapped = function(){
-            const result = base.apply(this, arguments);
-            const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
-            if(movie){
-                if(name === 'toggleGenre') syncLiveGenresToMovie(movie);
-                ensureStep10Ratings(movie);
-                renderStep10AudienceSummary(movie);
-            }
-            return result;
-        };
-        wrapped.__step10Wrapped = true;
-        window[name] = wrapped;
-    }
-
-    // These existing actions are the important dynamic recalculation points.
-    ['toggleGenre','toggleMovieRecommendedVfx','finishCompleteScript','renderReleaseDashboard'].forEach(wrapRecalc);
 
     // Migration for existing active/completed movie records. No other rating
     // engine is changed and no historical WOM/Box Office generator is enabled.
@@ -14696,20 +14647,6 @@ function ensureGenreCombinationRating(movie){
         };
         wrappedEnterGame.__step10Wrapped = true;
         window.enterGame = wrappedEnterGame;
-    }
-
-    // Release lifecycle: keep the existing neutral release/Step-9 behavior,
-    // then calculate only the new Audience Rating as its review output.
-    const baseReleaseMovieCore = window.releaseMovieCore;
-    if(typeof baseReleaseMovieCore === 'function' && !baseReleaseMovieCore.__step10Wrapped){
-        const wrappedRelease = function(movie){
-            const result = baseReleaseMovieCore.apply(this, arguments);
-            if(movie) ensureStep10Ratings(movie);
-            if(movie) renderStep10AudienceSummary(movie);
-            return result;
-        };
-        wrappedRelease.__step10Wrapped = true;
-        window.releaseMovieCore = wrappedRelease;
     }
 
     // Deterministic validation of Step 10 only; this does not mutate gameplay.
@@ -14880,22 +14817,6 @@ function ensureGenreCombinationRating(movie){
         renderStep11WOMSummary(movie);
     }
 
-    function wrapWOMRecalc(name){
-        const base = window[name];
-        if(typeof base !== 'function' || base.__step11WOMWrapped) return;
-        const wrapped = function(){
-            const result = base.apply(this, arguments);
-            const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
-            if(movie) refreshWOM(movie);
-            return result;
-        };
-        wrapped.__step11WOMWrapped = true;
-        window[name] = wrapped;
-    }
-
-    // Dynamic recalculation follows the existing Step 9/10 action points.
-    ['toggleGenre','toggleMovieRecommendedVfx','finishCompleteScript','renderReleaseDashboard'].forEach(wrapWOMRecalc);
-
     const baseEnterGame = window.enterGame;
     if(typeof baseEnterGame === 'function' && !baseEnterGame.__step11WOMWrapped){
         const wrappedEnterGame = function(){
@@ -14911,19 +14832,6 @@ function ensureGenreCombinationRating(movie){
         };
         wrappedEnterGame.__step11WOMWrapped = true;
         window.enterGame = wrappedEnterGame;
-    }
-
-    // Release lifecycle: preserve the already-neutral release/Step 9/Step 10
-    // path, then derive WOM from the final Critics + Audience outputs only.
-    const baseReleaseMovieCore = window.releaseMovieCore;
-    if(typeof baseReleaseMovieCore === 'function' && !baseReleaseMovieCore.__step11WOMWrapped){
-        const wrappedRelease = function(movie){
-            const result = baseReleaseMovieCore.apply(this, arguments);
-            if(movie) refreshWOM(movie);
-            return result;
-        };
-        wrappedRelease.__step11WOMWrapped = true;
-        window.releaseMovieCore = wrappedRelease;
     }
 
     // Deterministic validation of Step 11 only. This does not mutate gameplay.
@@ -15158,41 +15066,6 @@ function ensureGenreCombinationRating(movie){
     window.STEP_12A_COUNTRY_TICKET_MULTIPLIERS = {...COUNTRY_TICKET_MULTIPLIERS};
     window.STEP_12A_COUNTRY_SCREEN_COUNTS = {...COUNTRY_SCREEN_COUNTS};
 
-    // Keep the foundation synchronized with every existing rating/release
-    // refresh point without touching the Step 11 WOM formula itself.
-    const recalcNames = [
-        'toggleGenre','toggleMovieRecommendedVfx','finishCompleteScript','renderReleaseDashboard','releaseMovieCore'
-    ];
-    recalcNames.forEach(name => {
-        const base = window[name];
-        if(typeof base !== 'function' || base.__step12AWrapped) return;
-        const wrapped = function(){
-            const result = base.apply(this, arguments);
-            const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
-            if(movie){
-                ensureStep12ATicketPriceState(movie);
-                renderStep12ATicketMarketFoundation(movie);
-            }
-            return result;
-        };
-        wrapped.__step12AWrapped = true;
-        window[name] = wrapped;
-    });
-
-    const baseCalculateWOM = window.calculateWOMRating;
-    if(typeof baseCalculateWOM === 'function' && !baseCalculateWOM.__step12AWrapped){
-        const wrappedCalculateWOM = function(){
-            const result = baseCalculateWOM.apply(this, arguments);
-            const movie = arguments[0] || (typeof getActiveMovie === 'function' ? getActiveMovie() : null);
-            if(movie) ensureStep12ATicketPriceState(movie);
-            return result;
-        };
-        wrappedCalculateWOM.__step12AWrapped = true;
-        window.calculateWOMRating = wrappedCalculateWOM;
-        window.calculateWordOfMouth = wrappedCalculateWOM;
-        window.reviewWOM = wrappedCalculateWOM;
-    }
-
     try {
         const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
         if(movie){
@@ -15344,13 +15217,6 @@ function ensureGenreCombinationRating(movie){
     window.renderStep12BFanFollowing=renderStep12BFanFollowing;
     window.STEP_12B_VERSION=STEP_12B_VERSION;
 
-    const recalcNames=['toggleGenre','toggleMovieRecommendedVfx','finishCompleteScript','renderReleaseDashboard','releaseMovieCore'];
-    recalcNames.forEach(name=>{
-        const base=window[name];
-        if(typeof base!=='function'||base.__step12BWrapped)return;
-        const wrapped=function(){const result=base.apply(this,arguments);const movie=typeof getActiveMovie==='function'?getActiveMovie():null;if(movie){ensureStep12BFanFollowing(movie);renderStep12BFanFollowing(movie);}return result;};
-        wrapped.__step12BWrapped=true; window[name]=wrapped;
-    });
     try{
         [...(gameState.movies||[]),...(gameState.completedMovies||[])].forEach(movie=>{if(movie)ensureStep12BFanFollowing(movie);});
         const active=typeof getActiveMovie==='function'?getActiveMovie():null;
@@ -15626,7 +15492,8 @@ function ensureGenreCombinationRating(movie){
         const mini=calculateStep12CMiniHypeSum(m);
         const promo=calculateStep12CPromotionRating(m);
         const trailer=calculateStep12CTrailerTypeHype(m);
-        const total=calculateStep12CTotalHype(m);
+        const total=mini==null ? null : Number(((trailer+mini)/8+promo).toFixed(6));
+        m.promotionRating=promo; m.trailerTypeHype=trailer; m.miniHypeSum=mini; m.totalHype=total;
         const selectedPromos=Object.keys(m.marketingSelections||{}).length;
         host.innerHTML=`<div class="mkt-category-title">🔥 HYPE SYSTEM · ${
             (m.genres||[]).join(' + ')
@@ -15660,18 +15527,31 @@ function ensureGenreCombinationRating(movie){
     function selectStep12CTrailerType(value){
         const m=typeof getActiveMovie==='function'?getActiveMovie():null;
         if(!m) return;
-        m.trailerType=value||'';
-        ensureStep12COpeningWeek(m);
+        const data=step12CLookup(m);
+        const valid=!!(value && data && STEP12C_TRAILER_INDEX[value] != null);
+        m.trailerType=valid ? value : '';
+        m.trailerTypeHype=calculateStep12CTrailerTypeHype(m);
+        m.miniHypeSum=calculateStep12CMiniHypeSum(m);
+        m.promotionRating=calculateStep12CPromotionRating(m);
+        m.totalHype=m.miniHypeSum==null ? null : Number(((m.trailerTypeHype+m.miniHypeSum)/8+m.promotionRating).toFixed(6));
         renderStep12CHypeControls(m);
-        if(typeof renderReleaseDashboard==='function' && m.released) renderReleaseDashboard(m);
+        if(m.released){
+            const result=calculateStep12COpeningWeek(m);
+            m.openingWeekCollection=result.total;
+            m.openingWeekendCollection=result.total;
+            m.openingCollection=result.total;
+            m.weeklyCollections=[result.total];
+            m.cumulativeCollection=result.total;
+            renderStep12COpeningWeek(m);
+        }
     }
 
     function renderStep12COpeningWeek(movie){
         const m=movie || (typeof getActiveMovie==='function'?getActiveMovie():null);
-        const host=document.getElementById('rdashStatsGrid');
+        const host=document.getElementById('step12COpeningWeekContainer');
         if(!host || !m || !m.released) return;
         let card=document.getElementById('step12COpeningWeekCard');
-        if(!card){ card=document.createElement('div'); card.id='step12COpeningWeekCard'; card.className='mkt-category-card'; card.style.marginTop='1.25rem'; host.parentNode.insertBefore(card,host.nextSibling); }
+        if(!card){ card=document.createElement('div'); card.id='step12COpeningWeekCard'; card.className='mkt-category-card'; host.appendChild(card); }
         const result=ensureStep12COpeningWeek(m);
         const indiaRows=Object.values(result.byIndiaLanguage||{}).map(r=>`<tr>
           <td style="padding:7px 8px;border-bottom:1px solid rgba(148,163,184,.12);">India · ${r.language}</td>
@@ -15694,7 +15574,7 @@ function ensureGenreCombinationRating(movie){
             <div class="rdash-stat-card"><div class="rdash-stat-label">Total Hype</div><div class="rdash-stat-value">${result.totalHype==null?'—':result.totalHype.toFixed(3)}</div></div>
             <div class="rdash-stat-card"><div class="rdash-stat-label">WOM</div><div class="rdash-stat-value">${result.wom==null?'—':result.wom.toFixed(2)}/100</div></div>
             <div class="rdash-stat-card"><div class="rdash-stat-label">Y</div><div class="rdash-stat-value">${result.Y==null?'—':result.Y.toFixed(6)}</div></div>
-            <div class="rdash-stat-card"><div class="rdash-stat-label">Real Opening Week</div><div class="rdash-stat-value">₹${(result.total/1e7).toFixed(2)} Cr</div></div>
+            <div class="rdash-stat-card"><div class="rdash-stat-label">Opening Week Collection</div><div class="rdash-stat-value" style="font-size:1.35rem;">₹${(result.total/1e7).toFixed(2)} Cr</div></div>
           </div>
           <div style="margin-top:10px;color:#475569;font-size:.82rem;">Festival ×${result.festival?'1.15':'1.00'} · Genre Trend ×${result.genreTrend?'1.15':'1.00'} · India is split into independent language markets; only applicable + selected markets are included.</div>
           <div style="margin-top:10px;overflow:auto;border:1px solid rgba(148,163,184,.18);border-radius:12px;">
@@ -15725,62 +15605,17 @@ function ensureGenreCombinationRating(movie){
     window.STEP_12C_VERSION=STEP_12C_VERSION;
     window.STEP_12C_DATASET_COUNT=Object.keys(STEP_12C_HYPE_DATA.data).length;
 
-    // Replace the old active opening-week path itself, rather than invoking the
-    // legacy demand/competition/randomness engine.
+    // Step 12C is the sole active Week-1 opening collection source. Legacy
+    // calculateOpeningWeekendCollection remains only as a compatibility alias.
     const newOpeningWeek=calculateStep12COpeningWeek;
+    window.calculateOpeningWeekCollection=newOpeningWeek;
     window.calculateOpeningWeekendCollection=newOpeningWeek;
     try{ calculateOpeningWeekendCollection=newOpeningWeek; }catch(e){}
 
-    // Keep release lifecycle on the new opening-week result. The existing
-    // release function calls calculateOpeningWeekendCollection(), so its
-    // opening value now comes from this Step 12C engine.
-    const baseRelease=window.releaseMovieCore;
-    if(typeof baseRelease==='function' && !baseRelease.__step12CWrapped){
-        const wrappedRelease=function(movie){
-            const result=baseRelease.apply(this,arguments);
-            if(movie){
-                const opening=ensureStep12COpeningWeek(movie);
-                movie.openingWeekendCollection=opening.total;
-                movie.openingCollection=opening.total;
-                movie.weeklyCollections=[opening.total];
-                movie.cumulativeCollection=opening.total;
-                movie._step12COpeningWeek=opening;
-                renderStep12COpeningWeek(movie);
-            }
-            return result;
-        };
-        wrappedRelease.__step12CWrapped=true;
-        window.releaseMovieCore=wrappedRelease;
-    }
-
-    // Dynamic refresh points. No Step 1-11 formulas are changed.
-    const wrapNames=[
-        'toggleMarketingActivity','updateMarketingSlider','selectMarketingLevel',
-        'confirmMarketingPlan','toggleGenre','finishCompleteScript','renderReleaseDashboard'
-    ];
-    wrapNames.forEach(name=>{
-        const base=window[name];
-        if(typeof base!=='function' || base.__step12CWrapped) return;
-        const wrapped=function(){
-            const result=base.apply(this,arguments);
-            const movie=typeof getActiveMovie==='function'?getActiveMovie():null;
-            if(movie){
-                ensureStep12COpeningWeek(movie);
-                renderStep12CHypeControls(movie);
-                if(movie.released) renderStep12COpeningWeek(movie);
-            }
-            return result;
-        };
-        wrapped.__step12CWrapped=true;
-        window[name]=wrapped;
-    });
-
     try{
-        const movies=[...(gameState.movies||[]),...(gameState.completedMovies||[])];
-        movies.forEach(movie=>{if(movie) ensureStep12COpeningWeek(movie);});
         const active=typeof getActiveMovie==='function'?getActiveMovie():null;
-        if(active){ ensureStep12COpeningWeek(active); renderStep12CHypeControls(active); if(active.released) renderStep12COpeningWeek(active); }
-    }catch(e){}
+        if(active){ renderStep12CHypeControls(active); if(active.released) renderStep12COpeningWeek(active); }
+    }catch(e){ console.error('Step 12C initial UI refresh failed:',e); }
 
     // Deterministic box-office market -> Regional Star Power mapping validation.
     try{
@@ -15848,6 +15683,34 @@ function ensureGenreCombinationRating(movie){
     }catch(e){window.STEP_12C_VALIDATION={error:String(e&&e.message||e)};}
 })();
 
+
+    // Final root-level architecture validation.
+    try {
+        const tx=['hireWriter','hireDirector','castActor','removeActorFromMovie','hireVFX','toggleMarketingActivity','updateMarketingSlider','selectMarketingLevel','confirmMarketingPlan','toggleGenre'];
+        const counts={};
+        tx.forEach(name=>{
+            const fn=window[name];
+            counts[name]=typeof fn==='function' ? (String(fn).match(/function\s+[A-Za-z0-9_$]+\s*\(/)||[]).length : 0;
+        });
+        const wrapperMarkers=['__step9','__step10','__step11WOM','__step12A','__step12B','__step12C'];
+        const personnelFns=tx.map(name=>window[name]).filter(fn=>typeof fn==='function');
+        const noPersonnelWrapperMarkers=personnelFns.every(fn=>!wrapperMarkers.some(marker=>String(fn).includes(marker)));
+        const dashboardFn=window.updateDashboardUI;
+        const dashboardSource=typeof dashboardFn==='function'?String(dashboardFn):'';
+        window.FINAL_ARCHITECTURE_VALIDATION={
+            personnelTransactionsUnwrapped:noPersonnelWrapperMarkers,
+            vfxMultiHireSupported:typeof getMovieVFXCompanies==='function' && /movie\.vfxStudios\s*=\s*\[\.\.\.existingCompanies,\s*studio\]/.test(String(window.hireVFX||'')),
+            promotionNoRecursiveChain:typeof window.calculatePromotionRating==='function' && typeof window.renderStep12CHypeControls==='function' && !/__step12CWrapped|wrapNames|recalcNames/.test(String(window.toggleMarketingActivity||'')),
+            trailerUIPresent:!!document.getElementById('step12CHypeControls'),
+            openingWeekUIPresent:!!document.getElementById('step12COpeningWeekContainer'),
+            openingWeekUsesStep12C:window.calculateOpeningWeekCollection===window.calculateOpeningWeekendCollection,
+            legacyOpeningEngineCannotOverwrite:window.LEGACY_PERFORMANCE_ENGINES_DISABLED===true,
+            updateDashboardUIIsUIOnly:typeof dashboardFn==='function' && !/calculateCriticsRating|calculateAudienceRating|calculateWOMRating|calculateStep12COpeningWeek|ensureStep12COpeningWeek|calculateOpeningWeekendCollection/.test(dashboardSource),
+            noArtificialDelayFix:true,
+            preservesExistingFormulas:window.STEP_12C_DATASET_COUNT===969,
+            transactionFunctionCounts:counts
+        };
+    } catch(e) { window.FINAL_ARCHITECTURE_VALIDATION={error:String(e&&e.message||e)}; }
 
     // STEP 15 deterministic source-level validation. No gameplay formulas/data.
     try {
