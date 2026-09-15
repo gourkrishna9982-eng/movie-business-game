@@ -8167,7 +8167,7 @@ function calculateScriptDetailsAndQuality(m) {
 // not just their visual buttons. Successful Complete Script stays locked until
 // a new movie flow is explicitly started.
 let completeScriptInProgress = false;
-let hireWriterInProgress = false;
+const personnelHireLocks = new Set();
 
 function getCompleteScriptButton() {
     return document.getElementById('completeScriptBtn');
@@ -8904,25 +8904,39 @@ function populateWriterFilters() {
 }
 
 function hireWriter(writerId, clickedButton) {
-    if (hireWriterInProgress) return;
+    const lockKey = `writer:${writerId}`;
+    if (personnelHireLocks.has(lockKey)) return;
 
-    const activeMovieBefore = getActiveMovie();
-    if (!activeMovieBefore) {
+    const activeMovie = getActiveMovie();
+    if (!activeMovie) {
         alert("Please create a script/movie first before hiring a writer!");
         return;
     }
 
     const writer = EMBEDDED_WRITERS_DATA.find(w => w.id === writerId);
-    if (!writer || writer.status !== 'Available') return;
+    if (!writer) {
+        console.error('Hire Writer validation failed: writer not found', { writerId });
+        return;
+    }
+    if (writer.status !== 'Available') return;
 
     const salaryNum = parseSalaryToNumber(writer.salary);
-
-    if (gameState.cashOnHand < salaryNum) {
+    if (!Number.isFinite(salaryNum) || salaryNum < 0) {
+        console.error('Hire Writer validation failed: invalid salary', { writerId, salary: writer.salary, salaryNum });
+        alert("Unable to hire this writer because the salary data is invalid.");
+        return;
+    }
+    if (!gameState.hiredWriters || typeof gameState.hiredWriters !== 'object') {
+        console.error('Hire Writer validation failed: gameState.hiredWriters is unavailable', { writerId });
+        alert("Unable to hire this writer because the hiring system is not ready.");
+        return;
+    }
+    if (!Number.isFinite(Number(gameState.cashOnHand)) || Number(gameState.cashOnHand) < salaryNum) {
         alert("Not enough cash on hand to hire this writer!");
         return;
     }
 
-    hireWriterInProgress = true;
+    personnelHireLocks.add(lockKey);
 
     let button = clickedButton;
     if (!button) {
@@ -8933,47 +8947,52 @@ function hireWriter(writerId, clickedButton) {
 
     const cashBefore = gameState.cashOnHand;
     const writerStatusBefore = writer.status;
-    const previousMovieWriter = activeMovieBefore.writer;
-    const previousContractWeeks = activeMovieBefore.contractWeeks;
-    const hadHiredWriterEntry = Object.prototype.hasOwnProperty.call(gameState.hiredWriters || {}, writerId);
+    const previousMovieWriter = activeMovie.writer;
+    const previousContractWeeks = activeMovie.contractWeeks;
+    const hadHiredWriterEntry = Object.prototype.hasOwnProperty.call(gameState.hiredWriters, writerId);
     const previousHiredWriterEntry = hadHiredWriterEntry ? gameState.hiredWriters[writerId] : undefined;
 
     try {
-        gameState.cashOnHand -= salaryNum;
+        // All references are validated above. From here the hire is one atomic state transaction.
+        gameState.cashOnHand = Number(gameState.cashOnHand) - salaryNum;
         writer.status = "Busy";
         gameState.hiredWriters[writerId] = {
             writer: writer,
             expiryWeek: gameState.currentWeek,
             expiryYear: gameState.currentYear
         };
+        activeMovie.writer = writer;
+        activeMovie.contractWeeks = 4;
+        ensureWriterRating(activeMovie);
 
-        activeMovieBefore.writer = writer;
-        activeMovieBefore.contractWeeks = 4;
-        ensureWriterRating(activeMovieBefore);
-
-        // One dashboard refresh for the successful hire.
         updateDashboardUI();
         alert(`Successfully hired ${writer.name} for ${writer.salary}! Contract active for 4 weeks.`);
         showView('dashboardView');
     } catch (error) {
         gameState.cashOnHand = cashBefore;
         writer.status = writerStatusBefore;
-        activeMovieBefore.writer = previousMovieWriter;
-        activeMovieBefore.contractWeeks = previousContractWeeks;
-
+        activeMovie.writer = previousMovieWriter;
+        activeMovie.contractWeeks = previousContractWeeks;
         if (hadHiredWriterEntry) {
             gameState.hiredWriters[writerId] = previousHiredWriterEntry;
-        } else if (gameState.hiredWriters) {
+        } else {
             delete gameState.hiredWriters[writerId];
         }
-
         if (button) button.disabled = false;
-        console.error('Hire Writer action failed:', error);
-        alert('Unable to hire this writer. No salary was charged.');
+
+        console.error('Hire Writer action failed:', error, {
+            writerId,
+            writerName: writer.name,
+            salary: writer.salary,
+            salaryNum,
+            activeMovieId: activeMovie.id
+        });
+        alert(`Writer hire failed due to an internal error: ${error && error.message ? error.message : 'Unknown error'}. No salary was charged.`);
     } finally {
-        hireWriterInProgress = false;
+        personnelHireLocks.delete(lockKey);
     }
 }
+
 document.getElementById('searchInput').addEventListener('input', () => { currentWriterPage = 1; renderWritersTable(); });
 document.getElementById('filterIndustry').addEventListener('change', () => { currentWriterPage = 1; renderWritersTable(); });
 document.getElementById('filterNationality').addEventListener('change', () => { currentWriterPage = 1; renderWritersTable(); });
@@ -9049,7 +9068,7 @@ function renderDirectorsTable() {
             <td>${d.experience || '10 yrs'}</td>
             <td>${d.fanBase || '10M'}</td>
             <td><span class="status-badge ${statusClass}">${d.status || 'Available'}</span></td>
-            <td><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><button type="button" class="regional-detail-btn" onclick="openPersonnelRegionalDetail('director',${d.id})">Regional Star Power</button><button class="btn-hire" ${d.status !== 'Available' ? 'disabled' : ''} onclick="hireDirector(${d.id})">Hire</button></div></td>
+            <td><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><button type="button" class="regional-detail-btn" onclick="openPersonnelRegionalDetail('director',${d.id})">Regional Star Power</button><button type="button" class="btn-hire" data-director-id="${d.id}" ${d.status !== 'Available' ? 'disabled' : ''} onclick="hireDirector(${d.id}, this)">Hire</button></div></td>
         `;
         tbody.appendChild(tr);
     });
@@ -9094,36 +9113,94 @@ function populateDirectorFilters() {
     }
 }
 
-function hireDirector(directorId) {
-    if(!getActiveMovie()) {
+function hireDirector(directorId, clickedButton) {
+    const lockKey = `director:${directorId}`;
+    if (personnelHireLocks.has(lockKey)) return;
+
+    const activeMovie = getActiveMovie();
+    if (!activeMovie) {
         alert("Please create a script/movie first before hiring a director!");
         return;
     }
+
     const director = EMBEDDED_DIRECTORS_DATA.find(d => d.id === directorId);
-    if(!director || director.status !== 'Available') return;
+    if (!director) {
+        console.error('Hire Director validation failed: director not found', { directorId });
+        return;
+    }
+    if (director.status !== 'Available') return;
 
-    let salaryNum = parseSalaryToNumber(director.salary);
-
-    if(gameState.cashOnHand < salaryNum) {
+    const salaryNum = parseSalaryToNumber(director.salary);
+    if (!Number.isFinite(salaryNum) || salaryNum < 0) {
+        console.error('Hire Director validation failed: invalid salary', { directorId, salary: director.salary, salaryNum });
+        alert("Unable to hire this director because the salary data is invalid.");
+        return;
+    }
+    if (!gameState.hiredDirectors || typeof gameState.hiredDirectors !== 'object') {
+        console.error('Hire Director validation failed: gameState.hiredDirectors is unavailable', { directorId });
+        alert("Unable to hire this director because the hiring system is not ready.");
+        return;
+    }
+    if (!Number.isFinite(Number(gameState.cashOnHand)) || Number(gameState.cashOnHand) < salaryNum) {
         alert("Not enough cash on hand to hire this director!");
         return;
     }
 
-    gameState.cashOnHand -= salaryNum;
-    director.status = "Busy";
-    gameState.hiredDirectors[directorId] = {
-        director: director,
-        expiryWeek: gameState.currentWeek,
-        expiryYear: gameState.currentYear
-    };
+    personnelHireLocks.add(lockKey);
 
-    getActiveMovie().director = director;
-    getActiveMovie().directorContractWeeks = 4;
-    ensureDirectorRating(getActiveMovie()); 
+    let button = clickedButton;
+    if (!button) {
+        button = Array.from(document.querySelectorAll('.btn-hire[data-director-id]'))
+            .find(el => String(el.getAttribute('data-director-id')) === String(directorId));
+    }
+    if (button) button.disabled = true;
 
-    updateDashboardUI();
-    alert(`Successfully hired ${director.name} for ${director.salary}! Contract active for 4 weeks.`);
-    showView('dashboardView');
+    const cashBefore = gameState.cashOnHand;
+    const directorStatusBefore = director.status;
+    const previousMovieDirector = activeMovie.director;
+    const previousDirectorContractWeeks = activeMovie.directorContractWeeks;
+    const hadHiredDirectorEntry = Object.prototype.hasOwnProperty.call(gameState.hiredDirectors, directorId);
+    const previousHiredDirectorEntry = hadHiredDirectorEntry ? gameState.hiredDirectors[directorId] : undefined;
+
+    try {
+        // All references are validated above. From here the hire is one atomic state transaction.
+        gameState.cashOnHand = Number(gameState.cashOnHand) - salaryNum;
+        director.status = "Busy";
+        gameState.hiredDirectors[directorId] = {
+            director: director,
+            expiryWeek: gameState.currentWeek,
+            expiryYear: gameState.currentYear
+        };
+        activeMovie.director = director;
+        activeMovie.directorContractWeeks = 4;
+        ensureDirectorRating(activeMovie);
+
+        updateDashboardUI();
+        alert(`Successfully hired ${director.name} for ${director.salary}! Contract active for 4 weeks.`);
+        showView('dashboardView');
+    } catch (error) {
+        gameState.cashOnHand = cashBefore;
+        director.status = directorStatusBefore;
+        activeMovie.director = previousMovieDirector;
+        activeMovie.directorContractWeeks = previousDirectorContractWeeks;
+        if (hadHiredDirectorEntry) {
+            gameState.hiredDirectors[directorId] = previousHiredDirectorEntry;
+        } else {
+            delete gameState.hiredDirectors[directorId];
+        }
+        if (button) button.disabled = false;
+
+        console.error('Hire Director action failed:', error, {
+            directorId,
+            directorName: director.name,
+            salary: director.salary,
+            salaryNum,
+            activeMovieId: activeMovie.id
+        });
+        alert(`Director hire failed due to an internal error: ${error && error.message ? error.message : 'Unknown error'}. No salary was charged.`);
+    } finally {
+        personnelHireLocks.delete(lockKey);
+    }
 }
 
 document.getElementById('searchDirectorInput').addEventListener('input', () => { currentDirectorPage = 1; renderDirectorsTable(); });
@@ -15731,7 +15808,8 @@ function ensureGenreCombinationRating(movie){
     try {
         window.STEP_15_REENTRANCY_VALIDATION = {
             completeScriptGuardPresent: typeof completeScriptInProgress !== 'undefined',
-            writerGuardPresent: typeof hireWriterInProgress !== 'undefined',
+            writerGuardPresent: typeof personnelHireLocks !== 'undefined',
+            directorGuardPresent: typeof personnelHireLocks !== 'undefined',
             completeScriptButtonPresent: !!document.getElementById('completeScriptBtn'),
             writerHireButtonsCarryStableIds: document.querySelectorAll('.btn-hire[data-writer-id]').length >= 0,
             noArtificialDelayBasedFix: true,
