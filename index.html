@@ -8965,6 +8965,8 @@ function hireWriter(writerId, clickedButton) {
         activeMovie.contractWeeks = 4;
         ensureWriterRating(activeMovie);
 
+        // Commit is complete; release only this person's lock before the lightweight UI refresh.
+        personnelHireLocks.delete(lockKey);
         updateDashboardUI();
         alert(`Successfully hired ${writer.name} for ${writer.salary}! Contract active for 4 weeks.`);
         showView('dashboardView');
@@ -9175,6 +9177,8 @@ function hireDirector(directorId, clickedButton) {
         activeMovie.directorContractWeeks = 4;
         ensureDirectorRating(activeMovie);
 
+        // Commit is complete; release only this person's lock before the lightweight UI refresh.
+        personnelHireLocks.delete(lockKey);
         updateDashboardUI();
         alert(`Successfully hired ${director.name} for ${director.salary}! Contract active for 4 weeks.`);
         showView('dashboardView');
@@ -13498,7 +13502,13 @@ initializeNewFeatureUI();
   };
 
   const _oldUpdate=updateDashboardUI;
-  updateDashboardUI=function(){_oldUpdate();updatePreReleaseButtons();};
+  updateDashboardUI=function(){
+    _oldUpdate();
+    updatePreReleaseButtons();
+    const m=getActiveMovie();
+    const btn=document.getElementById('activeMovieSongsBtn');
+    if(btn){btn.style.display=(m&&((m.songCount||0)>0||((m.songs||[]).length>0)))?'inline-block':'none';}
+  };
   const _oldShow=showView;
   showView=function(viewId){
     if(viewId==='teaserTestingView'){const m=getActiveMovie();if(!m)return;ensurePreReleaseState(m);if(!getMovieVFXCompanies(m).length||n(m.vfxContractWeeks,0)>0){alert('Teaser Testing unlocks after VFX Post-Production is complete.');return;}}
@@ -13857,8 +13867,6 @@ initializeNewFeatureUI();
     window.renderPreMarketingForecast=function(){if(oldForecast)oldForecast.apply(this,arguments);const m=getActiveMovie();if(m){calculateBuzz(m);renderBuzzCard(m);}};
 
     // Additive song button/display and navigation.
-    const oldUpdateDashboard=window.updateDashboardUI;
-    window.updateDashboardUI=function(){if(oldUpdateDashboard)oldUpdateDashboard.apply(this,arguments);const m=getActiveMovie();const btn=document.getElementById('activeMovieSongsBtn');if(btn){btn.style.display=(m&&((m.songCount||0)>0||((m.songs||[]).length>0)))?'inline-block':'none';}};
     const oldShowView=window.showView;
     window.showView=function(viewId){if(viewId==='songReleaseView'){const m=getActiveMovie();if(!m){alert('Create/select a movie first.');return;}ensureSongState(m);if(!m.songs.length){alert('This movie has no songs configured.');return;}}oldShowView.apply(this,arguments);if(viewId==='songReleaseView')renderSongs();if(viewId==='preMarketingForecastView'){const m=getActiveMovie();if(m){calculateBuzz(m);renderBuzzCard(m);}}};
 
@@ -14200,26 +14208,6 @@ function ensureGenreCombinationRating(movie){
         };
     }
 
-    const baseHireWriter = window.hireWriter;
-    if(typeof baseHireWriter === 'function'){
-        window.hireWriter = function(){
-            const result = baseHireWriter.apply(this, arguments);
-            const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
-            if(movie) ensureStep9Ratings(movie);
-            return result;
-        };
-    }
-
-    const baseHireDirector = window.hireDirector;
-    if(typeof baseHireDirector === 'function'){
-        window.hireDirector = function(){
-            const result = baseHireDirector.apply(this, arguments);
-            const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
-            if(movie) ensureStep9Ratings(movie);
-            return result;
-        };
-    }
-
     const baseToggleVfx = window.toggleMovieRecommendedVfx;
     if(typeof baseToggleVfx === 'function'){
         window.toggleMovieRecommendedVfx = function(){
@@ -14237,17 +14225,6 @@ function ensureGenreCombinationRating(movie){
             const result = baseToggleGenre.apply(this, arguments);
             const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
             if(movie) ensureStep9Ratings(movie);
-            renderStep9RatingSummary(movie);
-            return result;
-        };
-    }
-
-    const baseUpdateDashboardUI = window.updateDashboardUI;
-    if(typeof baseUpdateDashboardUI === 'function'){
-        window.updateDashboardUI = function(){
-            const movie = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
-            if(movie) ensureStep9Ratings(movie);
-            const result = baseUpdateDashboardUI.apply(this, arguments);
             renderStep9RatingSummary(movie);
             return result;
         };
@@ -14611,8 +14588,7 @@ function ensureGenreCombinationRating(movie){
 
     // These existing actions are the important dynamic recalculation points.
     ['toggleGenre','toggleMovieRecommendedVfx','castActor','removeActorFromMovie',
-     'hireWriter','hireDirector','finishCompleteScript','updateDashboardUI',
-     'renderReleaseDashboard'].forEach(wrapRecalc);
+     'finishCompleteScript','renderReleaseDashboard'].forEach(wrapRecalc);
 
     // Migration for existing active/completed movie records. No other rating
     // engine is changed and no historical WOM/Box Office generator is enabled.
@@ -14835,8 +14811,7 @@ function ensureGenreCombinationRating(movie){
 
     // Dynamic recalculation follows the existing Step 9/10 action points.
     ['toggleGenre','toggleMovieRecommendedVfx','castActor','removeActorFromMovie',
-     'hireWriter','hireDirector','finishCompleteScript','updateDashboardUI',
-     'renderReleaseDashboard'].forEach(wrapWOMRecalc);
+     'finishCompleteScript','renderReleaseDashboard'].forEach(wrapWOMRecalc);
 
     const baseEnterGame = window.enterGame;
     if(typeof baseEnterGame === 'function' && !baseEnterGame.__step11WOMWrapped){
@@ -15104,8 +15079,7 @@ function ensureGenreCombinationRating(movie){
     // refresh point without touching the Step 11 WOM formula itself.
     const recalcNames = [
         'toggleGenre','toggleMovieRecommendedVfx','castActor','removeActorFromMovie',
-        'hireWriter','hireDirector','finishCompleteScript','updateDashboardUI',
-        'renderReleaseDashboard','releaseMovieCore'
+        'finishCompleteScript','renderReleaseDashboard','releaseMovieCore'
     ];
     recalcNames.forEach(name => {
         const base = window[name];
@@ -15288,7 +15262,7 @@ function ensureGenreCombinationRating(movie){
     window.renderStep12BFanFollowing=renderStep12BFanFollowing;
     window.STEP_12B_VERSION=STEP_12B_VERSION;
 
-    const recalcNames=['toggleGenre','toggleMovieRecommendedVfx','castActor','removeActorFromMovie','hireWriter','hireDirector','finishCompleteScript','updateDashboardUI','renderReleaseDashboard','releaseMovieCore'];
+    const recalcNames=['toggleGenre','toggleMovieRecommendedVfx','castActor','removeActorFromMovie','finishCompleteScript','renderReleaseDashboard','releaseMovieCore'];
     recalcNames.forEach(name=>{
         const base=window[name];
         if(typeof base!=='function'||base.__step12BWrapped)return;
@@ -15710,8 +15684,7 @@ function ensureGenreCombinationRating(movie){
     const wrapNames=[
         'toggleMarketingActivity','updateMarketingSlider','selectMarketingLevel',
         'confirmMarketingPlan','toggleGenre','castActor','removeActorFromMovie',
-        'hireWriter','hireDirector','finishCompleteScript','updateDashboardUI',
-        'renderReleaseDashboard'
+        'finishCompleteScript','renderReleaseDashboard'
     ];
     wrapNames.forEach(name=>{
         const base=window[name];
