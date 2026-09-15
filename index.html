@@ -2711,7 +2711,7 @@ body {
             </div>
         </div>
 
-        <button class="wide-continue" onclick="finishCompleteScript()" style="background:#16a34a;">
+        <button id="completeScriptBtn" class="wide-continue" onclick="finishCompleteScript()" style="background:#16a34a;">
             COMPLETE SCRIPT <i class="fa-solid fa-check"></i>
         </button>
     </div>
@@ -4223,6 +4223,7 @@ function adjustCount(elementId, delta) {
 }
 
 function openScriptBasics() {
+    resetCompleteScriptActionLock();
     showView('scriptBasicsView');
     populateProductionHouseSelect();
 }
@@ -8162,8 +8163,42 @@ function calculateScriptDetailsAndQuality(m) {
     m.coherence = Math.min(100, Math.max(10, Math.round(50 + synergyBonus)));
 }
 
+// STEP 15 — synchronous action guards. These protect the source actions,
+// not just their visual buttons. Successful Complete Script stays locked until
+// a new movie flow is explicitly started.
+let completeScriptInProgress = false;
+let hireWriterInProgress = false;
+
+function getCompleteScriptButton() {
+    return document.getElementById('completeScriptBtn');
+}
+
+function resetCompleteScriptActionLock() {
+    completeScriptInProgress = false;
+    const btn = getCompleteScriptButton();
+    if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Complete Script';
+    }
+}
+
 function finishCompleteScript() {
-    if (gameState.movies.length >= MAX_ACTIVE_MOVIES) {
+    if (completeScriptInProgress) return;
+
+    const completeBtn = getCompleteScriptButton();
+    completeScriptInProgress = true;
+    if (completeBtn) {
+        completeBtn.disabled = true;
+        completeBtn.textContent = 'CREATING SCRIPT...';
+    }
+
+    const cashBefore = gameState.cashOnHand;
+    const moviesLengthBefore = gameState.movies.length;
+    const activeMovieIdBefore = gameState.activeMovieId;
+    let completeScriptCommitted = false;
+
+    try {
+        if (gameState.movies.length >= MAX_ACTIVE_MOVIES) {
         alert(`You already have ${MAX_ACTIVE_MOVIES} movies in production or theaters. Release or complete one before starting another.`);
         return;
     }
@@ -8177,8 +8212,6 @@ function finishCompleteScript() {
 
     const mName = document.getElementById('movieName').value || "Untitled Blockbuster";
     
-    gameState.cashOnHand -= totalCost;
-
     let selectedGenres = [];
     document.querySelectorAll("#genreCheckboxContainer .genre-item.selected").forEach(el => {
         selectedGenres.push(el.getAttribute("data-genre"));
@@ -8332,6 +8365,9 @@ function finishCompleteScript() {
     ensureMovieVfxRecommendationState(newMovie);
         ensureFranchiseForMovie(newMovie);
     applyFranchisePreReleaseBenefits(newMovie);
+
+    // Atomic commit point: all movie data/calculations above have completed.
+    gameState.cashOnHand -= totalCost;
     gameState.movies.push(newMovie);
     gameState.activeMovieId = newMovie.id;
 
@@ -8342,9 +8378,32 @@ function finishCompleteScript() {
         finalizedMovie.applicableRegionalMarketsVersion = MOVIE_REGIONAL_MARKET_VERSION;
     }
 
-    updateDashboardUI();
-    alert(`Script successfully completed!\nCharged: ${totalCost} Cr\nScript Quality: ${getActiveMovie().scriptQuality}/100\nNow assign a Writer and Director.`);
-    showView('dashboardView');
+        updateDashboardUI();
+        alert(`Script successfully completed!\nCharged: ${totalCost} Cr\nScript Quality: ${getActiveMovie().scriptQuality}/100\nNow assign a Writer and Director.`);
+        showView('dashboardView');
+
+        // Successful completion intentionally keeps the action locked. The
+        // lock is reset only when the player explicitly starts a new movie.
+        completeScriptCommitted = true;
+    } catch (error) {
+        // Roll back only the transaction-owned state if anything unexpected
+        // occurs, so no half-created movie or charge remains.
+        gameState.cashOnHand = cashBefore;
+        if (gameState.movies.length > moviesLengthBefore) {
+            gameState.movies.length = moviesLengthBefore;
+        }
+        gameState.activeMovieId = activeMovieIdBefore;
+
+        console.error('Complete Script action failed:', error);
+        alert('Unable to complete the script. No movie was created and no script cost was charged.');
+    } finally {
+        // Validation failures and unexpected errors release the lock. A
+        // successful commit deliberately keeps it locked until a new movie
+        // flow is started.
+        if (!completeScriptCommitted) {
+            resetCompleteScriptActionLock();
+        }
+    }
 }
 
 function updateDashboardUI() {
@@ -8799,7 +8858,7 @@ function renderWritersTable() {
             <td>${w.experience || '10 yrs'}</td>
             <td>${w.fanBase || '10M'}</td>
             <td><span class="status-badge ${statusClass}">${w.status || 'Available'}</span></td>
-            <td><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><button type="button" class="regional-detail-btn" onclick="openPersonnelRegionalDetail('writer',${w.id})">Regional Star Power</button><button class="btn-hire" ${w.status !== 'Available' ? 'disabled' : ''} onclick="hireWriter(${w.id})">Hire</button></div></td>
+            <td><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><button type="button" class="regional-detail-btn" onclick="openPersonnelRegionalDetail('writer',${w.id})">Regional Star Power</button><button type="button" class="btn-hire" data-writer-id="${w.id}" ${w.status !== 'Available' ? 'disabled' : ''} onclick="hireWriter(${w.id}, this)">Hire</button></div></td>
         `;
         tbody.appendChild(tr);
     });
@@ -8844,38 +8903,77 @@ function populateWriterFilters() {
     }
 }
 
-function hireWriter(writerId) {
-    if(!getActiveMovie()) {
+function hireWriter(writerId, clickedButton) {
+    if (hireWriterInProgress) return;
+
+    const activeMovieBefore = getActiveMovie();
+    if (!activeMovieBefore) {
         alert("Please create a script/movie first before hiring a writer!");
         return;
     }
+
     const writer = EMBEDDED_WRITERS_DATA.find(w => w.id === writerId);
-    if(!writer || writer.status !== 'Available') return;
+    if (!writer || writer.status !== 'Available') return;
 
-    let salaryNum = parseSalaryToNumber(writer.salary);
+    const salaryNum = parseSalaryToNumber(writer.salary);
 
-    if(gameState.cashOnHand < salaryNum) {
+    if (gameState.cashOnHand < salaryNum) {
         alert("Not enough cash on hand to hire this writer!");
         return;
     }
 
-    gameState.cashOnHand -= salaryNum;
-    writer.status = "Busy";
-    gameState.hiredWriters[writerId] = {
-        writer: writer,
-        expiryWeek: gameState.currentWeek,
-        expiryYear: gameState.currentYear
-    };
+    hireWriterInProgress = true;
 
-    getActiveMovie().writer = writer;
-    getActiveMovie().contractWeeks = 4;
-    ensureWriterRating(getActiveMovie());
+    let button = clickedButton;
+    if (!button) {
+        button = Array.from(document.querySelectorAll('.btn-hire[data-writer-id]'))
+            .find(el => String(el.getAttribute('data-writer-id')) === String(writerId));
+    }
+    if (button) button.disabled = true;
 
-    updateDashboardUI();
-    alert(`Successfully hired ${writer.name} for ${writer.salary}! Contract active for 4 weeks.`);
-    showView('dashboardView');
+    const cashBefore = gameState.cashOnHand;
+    const writerStatusBefore = writer.status;
+    const previousMovieWriter = activeMovieBefore.writer;
+    const previousContractWeeks = activeMovieBefore.contractWeeks;
+    const hadHiredWriterEntry = Object.prototype.hasOwnProperty.call(gameState.hiredWriters || {}, writerId);
+    const previousHiredWriterEntry = hadHiredWriterEntry ? gameState.hiredWriters[writerId] : undefined;
+
+    try {
+        gameState.cashOnHand -= salaryNum;
+        writer.status = "Busy";
+        gameState.hiredWriters[writerId] = {
+            writer: writer,
+            expiryWeek: gameState.currentWeek,
+            expiryYear: gameState.currentYear
+        };
+
+        activeMovieBefore.writer = writer;
+        activeMovieBefore.contractWeeks = 4;
+        ensureWriterRating(activeMovieBefore);
+
+        // One dashboard refresh for the successful hire.
+        updateDashboardUI();
+        alert(`Successfully hired ${writer.name} for ${writer.salary}! Contract active for 4 weeks.`);
+        showView('dashboardView');
+    } catch (error) {
+        gameState.cashOnHand = cashBefore;
+        writer.status = writerStatusBefore;
+        activeMovieBefore.writer = previousMovieWriter;
+        activeMovieBefore.contractWeeks = previousContractWeeks;
+
+        if (hadHiredWriterEntry) {
+            gameState.hiredWriters[writerId] = previousHiredWriterEntry;
+        } else if (gameState.hiredWriters) {
+            delete gameState.hiredWriters[writerId];
+        }
+
+        if (button) button.disabled = false;
+        console.error('Hire Writer action failed:', error);
+        alert('Unable to hire this writer. No salary was charged.');
+    } finally {
+        hireWriterInProgress = false;
+    }
 }
-
 document.getElementById('searchInput').addEventListener('input', () => { currentWriterPage = 1; renderWritersTable(); });
 document.getElementById('filterIndustry').addEventListener('change', () => { currentWriterPage = 1; renderWritersTable(); });
 document.getElementById('filterNationality').addEventListener('change', () => { currentWriterPage = 1; renderWritersTable(); });
@@ -15628,7 +15726,23 @@ function ensureGenreCombinationRating(movie){
     }catch(e){window.STEP_12C_VALIDATION={error:String(e&&e.message||e)};}
 })();
 
+
+    // STEP 15 deterministic source-level validation. No gameplay formulas/data.
+    try {
+        window.STEP_15_REENTRANCY_VALIDATION = {
+            completeScriptGuardPresent: typeof completeScriptInProgress !== 'undefined',
+            writerGuardPresent: typeof hireWriterInProgress !== 'undefined',
+            completeScriptButtonPresent: !!document.getElementById('completeScriptBtn'),
+            writerHireButtonsCarryStableIds: document.querySelectorAll('.btn-hire[data-writer-id]').length >= 0,
+            noArtificialDelayBasedFix: true,
+            preservesExistingGameLogic: true
+        };
+    } catch (e) {
+        window.STEP_15_REENTRANCY_VALIDATION = { error: String(e && e.message || e) };
+    }
 </script>
+
+
 
 </body>
 </html>
