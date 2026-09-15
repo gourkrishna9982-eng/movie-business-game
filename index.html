@@ -4344,7 +4344,7 @@ function renderStudioMoviesView() {
         let currentPhaseName = "Script Phase";
         if (movie.released) currentPhaseName = `In Theaters (Week ${movie.marketRunWeek}/${BOX_OFFICE_RUN_WEEKS})`;
         else if (movie.marketingCompleted) currentPhaseName = "Marketing Execution";
-        else if (movie.vfx) currentPhaseName = "Post-Production VFX";
+        else if (getMovieVFXCompanies(movie).length) currentPhaseName = "Post-Production VFX";
         else if (castingComplete) currentPhaseName = "Filming Phase";
         else if (movie.writer && movie.director) currentPhaseName = "Pre-Production / Casting";
 
@@ -4357,7 +4357,7 @@ function renderStudioMoviesView() {
 
         let writerSal = movie.writer ? parseSalaryToNumber(movie.writer.salary) : 0;
         let directorSal = movie.director ? parseSalaryToNumber(movie.director.salary) : 0;
-        let vfxCost = movie.vfx ? parseSalaryToNumber(movie.vfx.cost) : 0;
+        let vfxCost = getMovieVFXCompanyCost(movie);
         let castSalaries = 0;
         ['hero', 'heroine', 'villain', 'supporting', 'cameo'].forEach(role => {
             if (movie.cast && movie.cast[role]) {
@@ -4535,7 +4535,7 @@ function openMovieHistoryDetail(movieId) {
         { label: 'Final Status', value: movie.finalStatus || '—' },
         { label: 'Writer', value: movie.writer ? movie.writer.name : '—' },
         { label: 'Director', value: movie.director ? movie.director.name : '—' },
-        { label: 'VFX Studio', value: movie.vfx ? movie.vfx.name : '—' },
+        { label: 'VFX Studio', value: getMovieVFXCompanyNames(movie).join(', ') || '—' },
         { label: 'Critics Rating', value: movie.criticsRating ? `⭐ ${movie.criticsRating}/10` : '—' },
         { label: 'Audience Rating', value: movie.audienceRating ? `⭐ ${movie.audienceRating}/10` : '—' },
         { label: 'Opening Collection', value: formatCrores(movie.openingWeekendCollection) },
@@ -5222,11 +5222,12 @@ function resolveMovieRegionalMarkets(movie) {
 
 function ensureMovieRegionalMarkets(movie) {
     if (!movie) return [];
-    if (movie.applicableRegionalMarketsVersion !== MOVIE_REGIONAL_MARKET_VERSION ||
-        !Array.isArray(movie.applicableRegionalMarkets)) {
-        movie.applicableRegionalMarkets = resolveMovieRegionalMarkets(movie);
-        movie.applicableRegionalMarketsVersion = MOVIE_REGIONAL_MARKET_VERSION;
-    }
+    // Step 3 is derived state: Original Language + Dubbing Languages are the
+    // live source of truth while a movie is being edited. Always re-resolve
+    // before ratings read the markets so a language/dubbing change can never
+    // leave a stale Hindi/India market cached in the movie.
+    movie.applicableRegionalMarkets = resolveMovieRegionalMarkets(movie);
+    movie.applicableRegionalMarketsVersion = MOVIE_REGIONAL_MARKET_VERSION;
     return movie.applicableRegionalMarkets;
 }
 
@@ -5300,8 +5301,10 @@ function resolveMovieActiveMarkets(movie) {
 
 function ensureMovieActiveMarkets(movie) {
     if (!movie) return [];
-    // Always resolve from the current release-country selection so removing
-    // or adding a country before release immediately changes future eligibility.
+    // Step 4 is also derived state. Rebuild Step 3 first, then intersect it
+    // with the CURRENT selected countries so language/dubbing/country edits
+    // immediately propagate to all four regional personnel ratings.
+    ensureMovieRegionalMarkets(movie);
     movie.activeMarkets = resolveMovieActiveMarkets(movie);
     movie.activeMarketsVersion = MOVIE_ACTIVE_MARKET_VERSION;
     return movie.activeMarkets;
@@ -8457,12 +8460,13 @@ function updateDashboardUI() {
 
         if(m.vfxUnlocked) {
             vfxStatusEl.style.display = 'block';
-            if(m.vfx) {
+            if(getMovieVFXCompanies(m).length) {
+                const vfxNames = getMovieVFXCompanyNames(m).join(', ');
                 if(m.vfxContractWeeks <= 0) {
-                    vfxStatusEl.innerText = `VFX: ${m.vfx.name} (Contract Complete)`;
+                    vfxStatusEl.innerText = `VFX: ${vfxNames} (Contracts Complete)`;
                     vfxBtn.style.display = 'none';
                 } else {
-                    vfxStatusEl.innerText = `VFX: ${m.vfx.name} (${m.vfxContractWeeks} weeks left)`;
+                    vfxStatusEl.innerText = `VFX: ${vfxNames} (${m.vfxContractWeeks} weeks left)`;
                     vfxBtn.style.display = 'none';
                 }
             } else {
@@ -8598,11 +8602,12 @@ function simulateOneWeekCore() {
             }
         }
 
-        if(m.vfx && m.vfxContractWeeks > 0) {
+        if(getMovieVFXCompanies(m).length && m.vfxContractWeeks > 0) {
             m.vfxContractWeeks--;
             if(m.vfxContractWeeks <= 0) {
                 m.marketingUnlocked = true;
-                alert(`VFX Post-Production complete for "${m.name}" by ${m.vfx.name}!\nThe MARKETING phase is now available.`);
+                const vfxNames = getMovieVFXCompanyNames(m).join(', ');
+                alert(`VFX Post-Production complete for "${m.name}" by ${vfxNames}!\nThe MARKETING phase is now available.`);
             }
         }
 
@@ -9816,30 +9821,72 @@ function populateVFXFilters() {
     }
 }
 
+function getMovieVFXCompanies(movie) {
+    if (!movie) return [];
+    // Multi-company collection is the active movie-level VFX hiring state.
+    // Migrate the old single-studio field once for existing saves.
+    if (!Array.isArray(movie.vfxStudios)) {
+        movie.vfxStudios = movie.vfx ? [movie.vfx] : [];
+    }
+    const seen = new Set();
+    movie.vfxStudios = movie.vfxStudios.filter(studio => {
+        if (!studio || studio.id == null || seen.has(studio.id)) return false;
+        seen.add(studio.id);
+        return true;
+    });
+    return movie.vfxStudios;
+}
+
+function getMovieVFXCompanyNames(movie) {
+    return getMovieVFXCompanies(movie).map(studio => studio.name).filter(Boolean);
+}
+
+function getMovieVFXCompanyCost(movie) {
+    return getMovieVFXCompanies(movie).reduce((sum, studio) =>
+        sum + parseSalaryToNumber(studio.cost), 0);
+}
+
+function getPrimaryMovieVFXCompany(movie) {
+    const companies = getMovieVFXCompanies(movie);
+    return companies[0] || null;
+}
+
 function hireVFX(vfxId) {
-    if(!getActiveMovie() || !getActiveMovie().vfxUnlocked) {
+    const movie = getActiveMovie();
+    if(!movie || !movie.vfxUnlocked) {
         alert("VFX post-production is not available yet!");
         return;
     }
+
     const studio = EMBEDDED_VFX_DATA.find(v => v.id === vfxId);
     if(!studio || studio.status !== 'Available') return;
 
-    let costNum = parseSalaryToNumber(studio.cost);
+    const existingCompanies = getMovieVFXCompanies(movie);
+    if (existingCompanies.some(v => Number(v.id) === Number(vfxId))) {
+        alert(`${studio.name} is already hired for this movie.`);
+        return;
+    }
 
+    const costNum = parseSalaryToNumber(studio.cost);
     if(gameState.cashOnHand < costNum) {
         alert("Not enough cash on hand to hire this VFX studio!");
         return;
     }
 
+    // Preserve the existing purchase/status/budget rules, but append this
+    // different company instead of replacing the movie's previous studio.
     gameState.cashOnHand -= costNum;
     studio.status = "Busy";
     gameState.hiredVFX[vfxId] = studio;
 
-    getActiveMovie().vfx = studio;
-    getActiveMovie().vfxContractWeeks = 4;
+    movie.vfxStudios = [...existingCompanies, studio];
+    // Compatibility pointer for older UI/save readers; the collection above
+    // is now the authoritative active hiring state.
+    movie.vfx = movie.vfxStudios[0] || null;
+    movie.vfxContractWeeks = Math.max(Number(movie.vfxContractWeeks) || 0, 4);
 
     updateDashboardUI();
-    alert(`Successfully hired ${studio.name} for ₹${costNum} Cr!\nPost-Production VFX started (4 weeks).`);
+    alert(`Successfully hired ${studio.name} for ₹${costNum} Cr!\nPost-Production VFX started (4 weeks).\nTotal VFX companies hired: ${movie.vfxStudios.length}`);
     showView('dashboardView');
 }
 
@@ -12697,7 +12744,7 @@ function finalizeMovieRun(m, options = {}) {
 
         const writerSal = m.writer ? parseSalaryToNumber(m.writer.salary) : 0;
         const directorSal = m.director ? parseSalaryToNumber(m.director.salary) : 0;
-        const vfxCost = m.vfx ? parseSalaryToNumber(m.vfx.cost) : 0;
+        const vfxCost = getMovieVFXCompanyCost(m);
         let castSalaries = 0;
         ['hero','heroine','villain','supporting','cameo'].forEach(role => {
             (m.cast && m.cast[role] || []).forEach(t => {
@@ -12719,7 +12766,7 @@ function finalizeMovieRun(m, options = {}) {
         m.marketingEffect = m.marketingTotal || 0;
         m.writerEffect = m.writer ? Number(((m.writer.story + m.writer.screenplay + m.writer.dialogue + m.writer.creativity) / 4).toFixed(1)) : 0;
         m.directorEffect = m.director ? Number(((m.director.direction + m.director.vision + m.director.creativity) / 3).toFixed(1)) : 0;
-        m.vfxEffect = m.vfx ? m.vfx.quality : 0;
+        m.vfxEffect = getPrimaryMovieVFXCompany(m) ? getPrimaryMovieVFXCompany(m).quality : 0;
 
         if (m.writer) {
             const wr = EMBEDDED_WRITERS_DATA.find(w => w.id === m.writer.id);
@@ -12729,10 +12776,10 @@ function finalizeMovieRun(m, options = {}) {
             const dr = EMBEDDED_DIRECTORS_DATA.find(d => d.id === m.director.id);
             if (dr) dr.status = 'Available';
         }
-        if (m.vfx) {
-            const vf = EMBEDDED_VFX_DATA.find(v => v.id === m.vfx.id);
+        getMovieVFXCompanies(m).forEach(studio => {
+            const vf = EMBEDDED_VFX_DATA.find(v => v.id === studio.id);
             if (vf) vf.status = 'Available';
-        }
+        });
         getMovieCastFlat(m).forEach(({ talent }) => {
             const pool = talent.gender === 'Female' ? EMBEDDED_ACTRESSES_DATA : EMBEDDED_ACTORS_DATA;
             const found = pool.find(a => a.id === talent.id);
@@ -13117,7 +13164,7 @@ initializeNewFeatureUI();
     const m=getActiveMovie(); const ids=['activeMovieTeaserBtn','activeMovieTrailerBtn','activeMovieForecastBtn','activeMovieMarketingBtn']; ids.forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
     if(!m)return; ensurePreReleaseState(m);
     const teaser=document.getElementById('activeMovieTeaserBtn'), trailer=document.getElementById('activeMovieTrailerBtn'), forecastBtn=document.getElementById('activeMovieForecastBtn'), marketing=document.getElementById('activeMovieMarketingBtn');
-    if(!m.released && m.vfx && n(m.vfxContractWeeks,0)<=0 && m.teaserScore==null){teaser.style.display='inline-block';return;}
+    if(!m.released && getMovieVFXCompanies(m).length && n(m.vfxContractWeeks,0)<=0 && m.teaserScore==null){teaser.style.display='inline-block';return;}
     if(!m.released && m.teaserScore!=null && m.trailerScore==null){trailer.style.display='inline-block';return;}
     if(!m.released && m.trailerScore!=null && !m.preMarketingForecast){forecastBtn.style.display='inline-block';return;}
     if(!m.released && m.preMarketingForecast && !m.marketingCompleted){marketing.style.display='inline-block';}
@@ -13129,7 +13176,7 @@ initializeNewFeatureUI();
   const _oldFinish=finishCompleteScript;
   finishCompleteScript=function(){_oldFinish();const m=getActiveMovie();if(m){ensurePreReleaseState(m);m.preReleaseStage='production';m.teaserTestingRequired=true;}};
   const _oldSimulate=simulateOneWeek;
-  simulateOneWeek=function(){_oldSimulate();(gameState.movies||[]).forEach(m=>{ensurePreReleaseState(m);if(m.vfx&&n(m.vfxContractWeeks,0)<=0&&!m.marketingCompleted&&!m.released&&m.teaserScore==null){m.teaserTestingUnlocked=true;m.marketingUnlocked=false;m.preReleaseStage='teaser';}if(m.preMarketingForecast&&!m.marketingCompleted&&!m.released)m.marketingUnlocked=true;});updatePreReleaseButtons();};
+  simulateOneWeek=function(){_oldSimulate();(gameState.movies||[]).forEach(m=>{ensurePreReleaseState(m);if(getMovieVFXCompanies(m).length&&n(m.vfxContractWeeks,0)<=0&&!m.marketingCompleted&&!m.released&&m.teaserScore==null){m.teaserTestingUnlocked=true;m.marketingUnlocked=false;m.preReleaseStage='teaser';}if(m.preMarketingForecast&&!m.marketingCompleted&&!m.released)m.marketingUnlocked=true;});updatePreReleaseButtons();};
   const _oldConfirmMarketing=confirmMarketingPlan;
   confirmMarketingPlan=function(){_oldConfirmMarketing();const m=getActiveMovie();if(m){ensurePreReleaseState(m);calculateHypeAfterMarketing(m);m.preReleaseStage='releasePlanning';m.marketingUnlocked=true;}};
   // Replace the old review helpers with the new weighted review model.
@@ -13187,7 +13234,7 @@ initializeNewFeatureUI();
     // only when those fields already exist on the movie.
     const existing=[];
     if(m&&m.totalProductionCost!=null) existing.push(clamp(35+Math.log10(1+Math.max(0,n(m.totalProductionCost,0)))*18));
-    if(m&&m.vfx&&m.vfx.quality!=null) existing.push(vfxScore(m));
+    if(getMovieVFXCompanies(m).length && getPrimaryMovieVFXCompany(m)?.quality!=null) existing.push(vfxScore(m));
     if(!existing.length)return 50;
     return clamp(avg(existing,50));
   }
@@ -13294,7 +13341,7 @@ initializeNewFeatureUI();
   updateDashboardUI=function(){_oldUpdate();updatePreReleaseButtons();};
   const _oldShow=showView;
   showView=function(viewId){
-    if(viewId==='teaserTestingView'){const m=getActiveMovie();if(!m)return;ensurePreReleaseState(m);if(!m.vfx||n(m.vfxContractWeeks,0)>0){alert('Teaser Testing unlocks after VFX Post-Production is complete.');return;}}
+    if(viewId==='teaserTestingView'){const m=getActiveMovie();if(!m)return;ensurePreReleaseState(m);if(!getMovieVFXCompanies(m).length||n(m.vfxContractWeeks,0)>0){alert('Teaser Testing unlocks after VFX Post-Production is complete.');return;}}
     if(viewId==='trailerTestingView'){const m=getActiveMovie();if(!m||m.teaserScore==null){alert('Complete Teaser Testing first.');return;}}
     if(viewId==='preMarketingForecastView'){const m=getActiveMovie();if(!m||m.trailerScore==null){alert('Complete Trailer Testing first.');return;}}
     _oldShow(viewId);
