@@ -10966,46 +10966,89 @@ function calculateFinalStatus(m) {
 }
 
 /* ---------- RELEASE PLANNING PAGE ---------- */
+function normalizeMovieReleaseDate(movie) {
+    if (!movie || !movie.releaseDate) return;
+
+    const rawWeek = Number(movie.releaseDate.week);
+    const rawYear = Number(movie.releaseDate.year);
+
+    // Repair an already-saved invalid release year (for example NaN).
+    const week = Number.isFinite(rawWeek) && rawWeek >= 1 && rawWeek <= 52
+        ? Math.floor(rawWeek)
+        : null;
+    const year = Number.isFinite(rawYear) && rawYear >= 1
+        ? Math.floor(rawYear)
+        : null;
+
+    if (week !== null && year !== null) {
+        movie.releaseDate = { week, year };
+    } else if (week !== null) {
+        movie.releaseDate = {
+            week,
+            year: Number(gameState.currentYear) || 2000
+        };
+    } else {
+        movie.releaseDate = null;
+        movie.releasePlanningCompleted = false;
+    }
+}
+
 function populateReleaseDateSelectors() {
     const m = getActiveMovie();
     const weekSelect = document.getElementById('relpWeekSelect');
     const yearSelect = document.getElementById('relpYearSelect');
-    const curWeek = gameState.currentWeek;
-    const curYear = gameState.currentYear;
+    const curWeek = Number(gameState.currentWeek) || 1;
+    const curYear = Number(gameState.currentYear) || 2000;
+
+    if (!weekSelect || !yearSelect) return;
+
+    normalizeMovieReleaseDate(m);
 
     document.getElementById('relpCurrentWeek').innerText = curWeek;
     document.getElementById('relpCurrentYear').innerText = curYear;
 
-    if (weekSelect.dataset.built !== '1') {
-        weekSelect.innerHTML = '';
-        for (let w = 1; w <= 52; w++) {
-            const opt = document.createElement('option');
-            opt.value = w;
-            opt.innerText = 'Week ' + w;
-            weekSelect.appendChild(opt);
-        }
-        weekSelect.dataset.built = '1';
+    // Always rebuild from the authoritative game clock. This prevents an
+    // empty/stale select value from becoming NaN.
+    weekSelect.innerHTML = '';
+    for (let w = 1; w <= 52; w++) {
+        const opt = document.createElement('option');
+        opt.value = String(w);
+        opt.innerText = 'Week ' + w;
+        weekSelect.appendChild(opt);
     }
-    if (yearSelect.dataset.built !== '1') {
-        yearSelect.innerHTML = '';
-        for (let y = curYear; y <= curYear + 3; y++) {
+
+    yearSelect.innerHTML = '';
+    for (let y = curYear; y <= curYear + 3; y++) {
+        const opt = document.createElement('option');
+        opt.value = String(y);
+        opt.innerText = 'Year ' + y;
+        yearSelect.appendChild(opt);
+    }
+
+    if (m && m.releaseDate &&
+        Number.isFinite(Number(m.releaseDate.week)) &&
+        Number.isFinite(Number(m.releaseDate.year))) {
+
+        const savedWeek = Math.min(52, Math.max(1, Math.floor(Number(m.releaseDate.week))));
+        const savedYear = Math.floor(Number(m.releaseDate.year));
+
+        if (![...yearSelect.options].some(o => Number(o.value) === savedYear)) {
             const opt = document.createElement('option');
-            opt.value = y;
-            opt.innerText = 'Year ' + y;
+            opt.value = String(savedYear);
+            opt.innerText = 'Year ' + savedYear;
             yearSelect.appendChild(opt);
         }
-        yearSelect.dataset.built = '1';
-    }
 
-    if (m.releaseDate) {
-        weekSelect.value = m.releaseDate.week;
-        yearSelect.value = m.releaseDate.year;
+        weekSelect.value = String(savedWeek);
+        yearSelect.value = String(savedYear);
     } else {
-        weekSelect.value = curWeek;
-        yearSelect.value = curYear;
+        weekSelect.value = String(curWeek);
+        yearSelect.value = String(curYear);
     }
-}
 
+    weekSelect.dataset.built = '1';
+    yearSelect.dataset.built = '1';
+}
 function renderOttGrid() {
     const m = getActiveMovie();
     const grid = document.getElementById('relpOttGrid');
@@ -11047,6 +11090,7 @@ function updateOttCostDisplay() {
 function renderReleasePlanningPage() {
     const m = getActiveMovie();
     if (!m || !m.releasePlanningUnlocked) return;
+    normalizeMovieReleaseDate(m);
     document.getElementById('relpMovieTitle').innerText = m.name;
     populateReleaseDateSelectors();
     renderOttGrid();
@@ -11081,10 +11125,19 @@ function confirmReleasePlanning() {
         return;
     }
 
-    const week = parseInt(document.getElementById('relpWeekSelect').value);
-    const year = parseInt(document.getElementById('relpYearSelect').value);
+    const week = Number(document.getElementById('relpWeekSelect').value);
+    const year = Number(document.getElementById('relpYearSelect').value);
 
-    if (year < gameState.currentYear || (year === gameState.currentYear && week < gameState.currentWeek)) {
+    if (!Number.isInteger(week) || week < 1 || week > 52 ||
+        !Number.isInteger(year) || year < 1) {
+        alert("Please select a valid release week and release year.");
+        return;
+    }
+
+    const currentWeek = Number(gameState.currentWeek) || 1;
+    const currentYear = Number(gameState.currentYear) || 2000;
+
+    if (year < currentYear || (year === currentYear && week < currentWeek)) {
         alert("The release date cannot be before the current week.");
         return;
     }
