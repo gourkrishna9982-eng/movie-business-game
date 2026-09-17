@@ -9566,7 +9566,15 @@ function renderActorsTable() {
         const tr = document.createElement('tr');
         const ratingClass = a.overallRating >= 90 ? 'rating-green' : (a.overallRating >= 85 ? 'rating-blue' : 'rating-orange');
         const statusClass = a.status === 'Available' ? 'status-available' : 'status-busy';
-        const disableHire = (a.status !== 'Available') || roleFull;
+
+        // Direct Unhire action for talent already cast in this active movie.
+        // Existing salary/rating/box-office systems are not changed.
+        const castRole = ['hero','villain','heroine','supporting','cameo'].find(role =>
+            Array.isArray(cast[role]) &&
+            cast[role].some(c => c && Number(c.id) === Number(a.id) && c.gender === a.gender)
+        );
+        const isCastInActiveMovie = !!castRole;
+        const disableHire = (a.status !== 'Available') || roleFull || isCastInActiveMovie;
         const avatarUrl = a.gender === 'Female' ? 
             'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=100&auto=format&fit=crop' :
             'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=100&auto=format&fit=crop';
@@ -9594,7 +9602,12 @@ function renderActorsTable() {
             <td>${a.experience || '10'} yrs</td>
             <td>${a.fanBase || '10'}M</td>
             <td><span class="status-badge ${statusClass}">${a.status || 'Available'}</span></td>
-            <td><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><button type="button" class="regional-detail-btn" onclick="openPersonnelRegionalDetail('actor',${a.id},'${a.gender}')">Regional Star Power</button><button class="btn-hire" ${disableHire ? 'disabled' : ''} onclick="castActor(${a.id}, '${a.gender}')">Cast as ${CASTING_ROLE_LABELS[currentCastingRole]}</button></div></td>
+            <td><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                <button type="button" class="regional-detail-btn" onclick="openPersonnelRegionalDetail('actor',${a.id},'${a.gender}')">Regional Star Power</button>
+                ${isCastInActiveMovie
+                    ? `<button type="button" class="remove-from-movie-btn" onclick="removeActorFromMovie(${Number(a.id)}, '${a.gender || ''}', '${castRole}')">Unhire</button>`
+                    : `<button class="btn-hire" ${disableHire ? 'disabled' : ''} onclick="castActor(${a.id}, '${a.gender}')">Cast as ${CASTING_ROLE_LABELS[currentCastingRole]}</button>`}
+            </div></td>
         `;
         tbody.appendChild(tr);
     });
