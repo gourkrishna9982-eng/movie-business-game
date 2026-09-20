@@ -11147,13 +11147,26 @@ function renderReleasePlanningPage() {
     const confirmBtn = document.getElementById('relpConfirmBtn');
     const weekSelect = document.getElementById('relpWeekSelect');
     const yearSelect = document.getElementById('relpYearSelect');
+    let changeDateBtn = document.getElementById('relpChangeDateBtn');
+    if (!changeDateBtn) {
+        changeDateBtn = document.createElement('button');
+        changeDateBtn.type = 'button';
+        changeDateBtn.id = 'relpChangeDateBtn';
+        changeDateBtn.className = 'wd-btn';
+        changeDateBtn.style.cssText = 'background:#2563eb;border-color:#2563eb;padding:14px 24px;font-size:1rem;display:none;';
+        changeDateBtn.innerHTML = 'CHANGE RELEASE DATE <i class="fa-solid fa-calendar-days"></i>';
+        changeDateBtn.onclick = changeReleaseDate;
+        confirmBtn.parentNode.insertBefore(changeDateBtn, confirmBtn);
+    }
+
     if (m.releasePlanningCompleted) {
         confirmBtn.disabled = true;
         confirmBtn.innerText = 'Release Plan Confirmed';
         confirmBtn.style.opacity = '0.6';
         confirmBtn.style.cursor = 'not-allowed';
-        weekSelect.disabled = true;
-        yearSelect.disabled = true;
+        weekSelect.disabled = false;
+        yearSelect.disabled = false;
+        changeDateBtn.style.display = 'inline-block';
     } else {
         confirmBtn.disabled = false;
         confirmBtn.innerHTML = 'CONFIRM RELEASE PLAN <i class="fa-solid fa-arrow-right"></i>';
@@ -11161,7 +11174,42 @@ function renderReleasePlanningPage() {
         confirmBtn.style.cursor = 'pointer';
         weekSelect.disabled = false;
         yearSelect.disabled = false;
+        changeDateBtn.style.display = 'none';
     }
+}
+
+function changeReleaseDate() {
+    const m = getActiveMovie();
+    if (!m || !m.releasePlanningCompleted || m.released || m.marketRunComplete) return;
+
+    const week = Number(document.getElementById('relpWeekSelect').value);
+    const year = Number(document.getElementById('relpYearSelect').value);
+    const currentWeek = Number(gameState.currentWeek) || 1;
+    const currentYear = Number(gameState.currentYear) || 2000;
+
+    if (!Number.isInteger(week) || week < 1 || week > 52 ||
+        !Number.isInteger(year) || year < 1) {
+        alert('Please select a valid release week and release year.');
+        return;
+    }
+    if (year < currentYear || (year === currentYear && week < currentWeek)) {
+        alert('The release date cannot be before the current week.');
+        return;
+    }
+
+    const oldDate = m.releaseDate ? { week:Number(m.releaseDate.week), year:Number(m.releaseDate.year) } : null;
+    if (oldDate && oldDate.week === week && oldDate.year === year) {
+        alert('The release date is already set to this date.');
+        return;
+    }
+
+    m.releaseDate = { week, year };
+    // Changing the planned date does not re-charge OTT rights and does not
+    // recalculate ratings, hype, WOM, or box office. It only changes the
+    // future calendar date for this unreleased movie.
+    updateDashboardUI();
+    renderReleasePlanningPage();
+    alert(`Release date updated!\n${m.name}: Week ${week}, Year ${year}`);
 }
 
 function confirmReleasePlanning() {
@@ -16385,13 +16433,16 @@ function ensureGenreCombinationRating(movie){
             if(!movie.trailerType && movie.releasePlanningTrailerType && allowedTrailers.includes(movie.releasePlanningTrailerType)){
                 movie.trailerType = movie.releasePlanningTrailerType;
             }
-            if(!movie.trailerType){
-                alert(`Please select a Trailer Type for "${movie.name || 'this movie'}" before releasing the movie.`);
-                return false;
-            }
-            if(!allowedTrailers.includes(movie.trailerType)){
-                alert('Please select a valid Trailer Type before releasing the movie.');
-                return false;
+            // IMPORTANT: Release must not get stuck because an older/migrated
+            // multi-project save lost the live trailerType field. The trailer
+            // selection is already part of the movie's release-plan state; if
+            // that live field is temporarily missing, continue the release
+            // instead of blocking the entire movie. When a valid saved trailer
+            // exists above, it is restored automatically.
+            if(movie.trailerType && !allowedTrailers.includes(movie.trailerType)){
+                movie.trailerType = movie.releasePlanningTrailerType && allowedTrailers.includes(movie.releasePlanningTrailerType)
+                    ? movie.releasePlanningTrailerType
+                    : '';
             }
 
             // One authoritative Step 9 -> Step 10 -> Step 11 synchronization
