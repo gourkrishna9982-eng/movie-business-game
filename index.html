@@ -12259,6 +12259,7 @@ let currentUserEmail = null;   // the logged-in player's email, or null
 let hasServerSave = false;     // whether the server currently has a save for them
 let saveDebounceTimer = null;
 let saveInFlight = false;
+let saveInFlightPromise = null;
 let saveQueuedWhileInFlight = false;
 
 // Google Drive cloud-save layer. The OAuth client ID is safe to expose in a
@@ -12451,7 +12452,9 @@ async function driveFindSaveFile() {
   const response = await driveApi(url);
   if (!response.ok) throw await driveError(response, 'Drive file lookup failed');
   const result = await response.json();
-  const file = (result.files || [])[0] || null;
+  const files = Array.isArray(result.files) ? result.files.slice() : [];
+  files.sort((a, b) => String(b.modifiedTime || '').localeCompare(String(a.modifiedTime || '')));
+  const file = files[0] || null;
   googleDriveFileId = file ? file.id : null;
   hasDriveSave = !!file;
   return file;
@@ -12617,36 +12620,57 @@ gameState = makeReactive(gameState, scheduleSave);
 
 async function persistGameState() {
   if (!currentUserEmail) return;
-  if (saveInFlight) { saveQueuedWhileInFlight = true; return; }
-  saveInFlight = true;
-  try {
-    const snapshot = JSON.parse(JSON.stringify(gameState));
-    snapshot._saveMeta = Object.assign({}, snapshot._saveMeta || {}, {
-      savedAt: new Date().toISOString(),
-      email: currentUserEmail
-    });
 
-    // Google Drive is the primary cloud save. localStorage remains only as a
-    // same-device safety backup. No VPS/Render/database is required for save.
-    saveLocalGameState(currentUserEmail, snapshot);
-    if (googleDriveAccessToken) {
-      await driveSaveGameState(snapshot);
-    }
-  } catch (err) {
-    console.warn('Save preparation failed:', err);
+  // Never start a second cloud write while the previous save cycle is running.
+  // Changes made during the request are queued and become the next snapshot.
+  if (saveInFlight) {
+    saveQueuedWhileInFlight = true;
+    return saveInFlightPromise;
+  }
+
+  saveInFlight = true;
+  saveInFlightPromise = (async () => {
+    do {
+      saveQueuedWhileInFlight = false;
+      try {
+        const snapshot = JSON.parse(JSON.stringify(gameState));
+        snapshot._saveMeta = Object.assign({}, snapshot._saveMeta || {}, {
+          savedAt: new Date().toISOString(),
+          email: currentUserEmail
+        });
+
+        // Google Drive is the primary cloud save. localStorage remains a
+        // same-device backup and is always updated from the same snapshot.
+        saveLocalGameState(currentUserEmail, snapshot);
+        if (googleDriveAccessToken) {
+          await driveSaveGameState(snapshot);
+        }
+      } catch (err) {
+        console.warn('Save preparation failed:', err);
+      }
+    } while (saveQueuedWhileInFlight);
+  })();
+
+  try {
+    await saveInFlightPromise;
   } finally {
     saveInFlight = false;
-    if (saveQueuedWhileInFlight) {
-      saveQueuedWhileInFlight = false;
-      persistGameState();
-    }
+    saveInFlightPromise = null;
   }
 }
 
+
 // Immediate (non-debounced) flush — used on exit / tab close / login switch.
-function flushSaveNow() {
+async function flushSaveNow() {
   clearTimeout(saveDebounceTimer);
-  persistGameState();
+
+  // If a save is already running, wait for it first, then write one final
+  // snapshot if anything changed during that request.
+  if (saveInFlight && saveInFlightPromise) {
+    try { await saveInFlightPromise; } catch (_) {}
+  }
+  if (saveQueuedWhileInFlight) saveQueuedWhileInFlight = false;
+  await persistGameState();
 }
 
 window.addEventListener('beforeunload', () => { if (currentUserEmail) flushSaveNow(); });
@@ -12776,7 +12800,17 @@ async function goContinue() {
   }
 
   const localState = loadLocalGameState(currentUserEmail);
-  const winner = driveState || localState;
+
+  // Drive and localStorage can legitimately be at different save points (for
+  // example if the browser was closed while a Drive request was still pending).
+  // Always restore the newest complete snapshot instead of blindly preferring
+  // Drive. This prevents recently created/completed movies from appearing
+  // to disappear after reopening the game.
+  const driveTime = saveTimestamp(driveState);
+  const localTime = saveTimestamp(localState);
+  const winner = driveState && localState
+    ? (localTime > driveTime ? localState : driveState)
+    : (driveState || localState);
 
   if (!winner) {
     alert(googleDriveAccessToken
@@ -12791,8 +12825,8 @@ async function goContinue() {
   setTimeout(() => persistGameState(), 50);
 }
 
-function goExit() {
-  if (currentUserEmail) flushSaveNow();
+async function goExit() {
+  if (currentUserEmail) await flushSaveNow();
   currentUserEmail = null;
   hasServerSave = false;
   hasDriveSave = false;
