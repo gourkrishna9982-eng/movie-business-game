@@ -4260,8 +4260,16 @@ function toggleRow(checkbox) {
 }
 
 function toggleGenre(item) {
-    item.classList.toggle('selected');
     const movie=typeof getActiveMovie==='function'?getActiveMovie():null;
+    // Once Release Planning is confirmed, the movie's release inputs are
+    // authoritative. Changing genre here used to clear trailerType and could
+    // leave a movie with a confirmed release date but no trailer when multiple
+    // projects were being simulated in parallel.
+    if(movie && (movie.releasePlanningCompleted || movie.released || movie.marketRunComplete)) {
+        alert(`Genre cannot be changed after Release Planning has been confirmed for "${movie.name || 'this movie'}".`);
+        return;
+    }
+    item.classList.toggle('selected');
     if(movie){
         const container=document.getElementById('genreCheckboxContainer');
         if(container) movie.genres=Array.from(container.querySelectorAll('.genre-item.selected')).map(el=>String(el.getAttribute('data-genre')||'').trim()).filter(Boolean);
@@ -8786,7 +8794,18 @@ function simulateOneWeekCore() {
             const rd = m.releaseDate;
             const arrived = (gameState.currentYear > rd.year) || (gameState.currentYear === rd.year && gameState.currentWeek >= rd.week);
             if(arrived) {
-                releaseMovie(m);
+                // Multi-project fix: all legacy release dependencies must see
+                // the SAME movie that is currently being released. Previously
+                // the simulator passed `m` to releaseMovie(), but helpers that
+                // still read getActiveMovie() could operate on another project.
+                // That mismatch only appears when 2–3 movies are active.
+                const previousActiveMovieId = gameState.activeMovieId;
+                try {
+                    gameState.activeMovieId = m.id;
+                    releaseMovie(m);
+                } finally {
+                    gameState.activeMovieId = previousActiveMovieId;
+                }
             }
         } else if(m.released && !m.marketRunComplete) {
             if(m._theatricalRunSystemVersion !== THEATRICAL_WOM_RUN_VERSION && Number(m.marketRunWeek||0) < BOX_OFFICE_RUN_WEEKS) m._theatricalRunSystemVersion=THEATRICAL_WOM_RUN_VERSION;
@@ -11201,6 +11220,10 @@ function confirmReleasePlanning() {
     }
 
     m.releaseDate = { week, year };
+    // Persist the exact trailer chosen for this movie at the moment its
+    // release plan becomes authoritative. This is movie-local state and is
+    // intentionally not shared with other active projects.
+    m.releasePlanningTrailerType = m.trailerType;
     m.releasePlanningCompleted = true;
 
     updateDashboardUI();
@@ -16295,8 +16318,11 @@ function ensureGenreCombinationRating(movie){
     // ============================================================================
     function syncCurrentMovieRatingState(movie){
         if(!movie) return null;
-        const active = typeof getActiveMovie === 'function' ? getActiveMovie() : null;
-        if(active !== movie || movie.marketRunComplete) return movie;
+        // This function is movie-scoped. During multi-project simulation the
+        // movie being released may not be the UI-selected project, so do not
+        // reject a valid active project merely because activeMovieId differs.
+        // Completed/historical movies remain protected from recalculation.
+        if(movie.marketRunComplete) return movie;
 
         // Resolve every component first. This is critical: Critics/Audience/WOM
         // must consume the same synchronized component state, never a stale
@@ -16351,11 +16377,18 @@ function ensureGenreCombinationRating(movie){
                 alert(`Please select exactly 5 promotions before releasing the movie. Currently selected: ${selectedPromotions.length}/5.`);
                 return false;
             }
+            // The trailer belongs to THIS movie. If a movie has a confirmed
+            // release plan but its live trailerType was lost by an older save
+            // or a multi-project state transition, restore the exact trailer
+            // captured when the release plan was confirmed.
+            const allowedTrailers=Array.isArray(window.STEP_12C_TRAILER_TYPES)?window.STEP_12C_TRAILER_TYPES:[];
+            if(!movie.trailerType && movie.releasePlanningTrailerType && allowedTrailers.includes(movie.releasePlanningTrailerType)){
+                movie.trailerType = movie.releasePlanningTrailerType;
+            }
             if(!movie.trailerType){
-                alert('Please select a Trailer Type before releasing the movie.');
+                alert(`Please select a Trailer Type for "${movie.name || 'this movie'}" before releasing the movie.`);
                 return false;
             }
-            const allowedTrailers=Array.isArray(window.STEP_12C_TRAILER_TYPES)?window.STEP_12C_TRAILER_TYPES:[];
             if(!allowedTrailers.includes(movie.trailerType)){
                 alert('Please select a valid Trailer Type before releasing the movie.');
                 return false;
