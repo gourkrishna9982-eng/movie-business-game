@@ -10857,7 +10857,13 @@ function getTheatricalWomDropRange(wom, weekNumber) {
         5:[75,85], 6:[80,88], 7:[85,92]
     })[weekNumber];
 
-    return null;
+    // Preserve the existing theatrical-run behavior for WOM below 50.
+    // The requested table defines the 50–60 Poor band, but it does not
+    // authorize disabling Week 2–7 for lower WOM values.
+    return ({
+        2:[60,70], 3:[65,75], 4:[70,80],
+        5:[75,85], 6:[80,88], 7:[85,92]
+    })[weekNumber];
 }
 function randomInclusivePercentage(min,max){ return Number((min+Math.random()*(max-min)).toFixed(4)); }
 function ensureTheatricalWeeklyMarketState(movie){
