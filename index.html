@@ -234,6 +234,31 @@ body {
 }
 .movie-card.history-card { cursor: pointer; }
 .movie-card.history-card:hover { border-color: var(--accent-gold); }
+
+/* ---- Movie Poster (additive only) ---- */
+.movie-poster-thumb {
+  width: 58px; height: 82px; object-fit: cover; border-radius: 6px;
+  border: 1px solid var(--border-color); flex-shrink: 0; cursor: pointer;
+  background: rgba(255,255,255,0.04);
+}
+.movie-poster-title-wrap { display:flex; align-items:center; gap:12px; min-width:0; }
+.movie-poster-title-wrap h3 { margin-bottom:0 !important; }
+.movie-poster-upload {
+  font-size: 0.72rem; padding: 5px 9px; border-radius: 6px;
+  border: 1px solid var(--border-color); background: rgba(255,255,255,0.06);
+  color: var(--text-main); cursor: pointer; margin-top: 8px;
+}
+.movie-poster-upload:hover { border-color: var(--accent-blue); }
+.poster-viewer {
+  display:none; position:fixed; inset:0; z-index:1100; background:rgba(0,0,0,0.82);
+  align-items:center; justify-content:center; padding:20px;
+}
+.poster-viewer.show { display:flex; }
+.poster-viewer img { max-width:92vw; max-height:88vh; object-fit:contain; border-radius:8px; box-shadow:0 12px 40px rgba(0,0,0,0.45); }
+.poster-viewer-close {
+  position:absolute; top:18px; right:18px; width:36px; height:36px; border:0;
+  border-radius:50%; background:rgba(255,255,255,0.12); color:#fff; cursor:pointer; font-size:18px;
+}
 .history-modal {
   display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
   background: rgba(0, 0, 0, 0.65); z-index: 1000; align-items: center; justify-content: center; padding: 20px;
@@ -1893,6 +1918,12 @@ body {
                  openActorProfileDetail). -->
         </div>
     </div>
+</div>
+
+<!-- MOVIE POSTER VIEWER (additive only) -->
+<div id="moviePosterViewer" class="poster-viewer" onclick="closeMoviePosterViewer()">
+    <button class="poster-viewer-close" onclick="event.stopPropagation(); closeMoviePosterViewer()">✕</button>
+    <img id="moviePosterViewerImage" src="" alt="Movie Poster" onclick="event.stopPropagation()">
 </div>
 
 <!-- STUDIO ECOSYSTEM: CREATE PRODUCTION HOUSE MODAL -->
@@ -4394,6 +4425,76 @@ function renderStudioDashboardViews() {
 /* ==========================================================================
    1. MY CURRENT MOVIES (UI MODULE)
    ========================================================================== */
+function getMoviePosterTarget(movieId, isCompleted) {
+    const list = isCompleted ? (gameState.completedMovies || []) : (gameState.movies || []);
+    return list.find(m => m && m.id === movieId) || null;
+}
+
+function openMoviePosterViewer(posterData) {
+    if (!posterData) return;
+    const viewer = document.getElementById('moviePosterViewer');
+    const image = document.getElementById('moviePosterViewerImage');
+    if (!viewer || !image) return;
+    image.src = posterData;
+    viewer.classList.add('show');
+}
+
+function closeMoviePosterViewer() {
+    const viewer = document.getElementById('moviePosterViewer');
+    const image = document.getElementById('moviePosterViewerImage');
+    if (viewer) viewer.classList.remove('show');
+    if (image) image.src = '';
+}
+
+function handleMoviePosterUpload(event, movieId, isCompleted) {
+    const input = event && event.target;
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    if (!file.type || !file.type.startsWith('image/')) {
+        alert('Please select an image file for the movie poster.');
+        input.value = '';
+        return;
+    }
+
+    const movie = getMoviePosterTarget(movieId, !!isCompleted);
+    if (!movie) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const source = new Image();
+        source.onload = function() {
+            const maxW = 700;
+            const maxH = 1000;
+            const scale = Math.min(1, maxW / source.width, maxH / source.height);
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(source.width * scale));
+            canvas.height = Math.max(1, Math.round(source.height * scale));
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+            movie.posterData = canvas.toDataURL('image/jpeg', 0.82);
+            if (typeof scheduleSave === 'function') scheduleSave();
+            if (typeof refreshStudioManagementDataViews === 'function') refreshStudioManagementDataViews();
+            else {
+                if (typeof renderStudioMoviesView === 'function') renderStudioMoviesView();
+                if (typeof renderStudioHistoryView === 'function') renderStudioHistoryView();
+            }
+        };
+        source.onerror = function() { alert('Poster image could not be loaded.'); };
+        source.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+    input.value = '';
+}
+
+function renderMoviePosterControls(movie, isCompleted) {
+    const id = String(movie.id || '').replace(/'/g, "\\'");
+    const label = movie.posterData ? 'Change Poster' : 'Add Poster';
+    const poster = movie.posterData
+        ? `<img class="movie-poster-thumb" src="${escapeHtml(movie.posterData)}" alt="${escapeHtml(movie.name || 'Movie Poster')}" onclick="event.stopPropagation(); openMoviePosterViewer('${escapeHtml(movie.posterData)}')">`
+        : '';
+    return `<div class="movie-poster-title-wrap">${poster}<div><h3>${movie.name || 'Untitled Movie'}</h3><label class="movie-poster-upload" onclick="event.stopPropagation()">📷 ${label}<input type="file" accept="image/*" style="display:none" onchange="handleMoviePosterUpload(event, '${id}', ${!!isCompleted})"></label></div></div>`;
+}
+
 function renderStudioMoviesView() {
     const container = document.getElementById("moviesListContainer");
     if (!container) return;
@@ -4459,7 +4560,8 @@ function renderStudioMoviesView() {
             <div class="movie-card" style="${isActive ? 'border:2px solid #16a34a;' : ''}">
                 <div>
                     <div class="movie-header-info" style="display:flex; justify-content:space-between; align-items:center;">
-                        <h3>${movie.name || 'Untitled Project'} ${isActive ? '<span style="font-size:11px; color:#16a34a; font-weight:600;">● VIEWING</span>' : ''}</h3>
+                        ${renderMoviePosterControls(movie, false)}
+                        ${isActive ? '<span style="font-size:11px; color:#16a34a; font-weight:600;">● VIEWING</span>' : ''}
                         ${!isActive ? `<button class="sim-btn sim-btn-confirm" style="width:auto; padding:6px 14px;" onclick="switchActiveMovie('${movie.id}')">Switch to This Movie</button>` : ''}
                     </div>
                     <div class="movie-badge-row">
@@ -4543,7 +4645,7 @@ function renderStudioHistoryView() {
             <div class="movie-card history-card" onclick="openMovieHistoryDetail('${movie.id}')">
                 <div>
                     <div class="movie-header-info">
-                        <h3>${movie.name || 'Untitled Movie'}</h3>
+                        ${renderMoviePosterControls(movie, true)}
                     </div>
                     <div class="movie-badge-row">
                         <span class="m-badge status-released">${movie.finalStatus || 'Released'}</span>
@@ -4603,6 +4705,11 @@ function openMovieHistoryDetail(movieId) {
     if (!movie) return;
 
     document.getElementById('historyDetailTitle').innerText = movie.name || 'Untitled Movie';
+
+    const posterHeader = document.getElementById('historyDetailTitle');
+    if (posterHeader && movie.posterData) {
+        posterHeader.innerHTML = `<span style="display:flex;align-items:center;gap:10px;"><img src="${escapeHtml(movie.posterData)}" alt="Poster" style="width:42px;height:58px;object-fit:cover;border-radius:5px;cursor:pointer;" onclick="event.stopPropagation();openMoviePosterViewer('${escapeHtml(movie.posterData)}')"><span>${escapeHtml(movie.name || 'Untitled Movie')}</span></span>`;
+    }
 
     let allCastNames = [];
     ['hero', 'villain', 'heroine', 'supporting', 'cameo'].forEach(role => {
@@ -8370,6 +8477,7 @@ function finishCompleteScript() {
     const newMovie = {
         id: 'mov_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9),
         name: mName,
+        posterData: null,
         franchiseId: chosenFranchiseId,
         franchiseName: chosenFranchiseName,
         franchiseMode: franchiseMode,
