@@ -15770,6 +15770,40 @@ function ensureGenreCombinationRating(movie){
         return Number((total / valid.length).toFixed(4));
     }
 
+    // Single, shared Cameo-eligibility threshold. Every Fan Following path
+    // (Step 12B country-wise AND Step 12C India-language) must read this same
+    // constant instead of hardcoding/duplicating their own copy.
+    const STEP_12B_CAMEO_ELIGIBILITY_THRESHOLD = 60;
+
+    // Single source of truth for "personnel list + territory/language" ->
+    // Fan Following average. Every existing role (Hero, Villain, Heroine,
+    // Supporting, Director, ...) flows into the existing average exactly as
+    // before — untouched. A Cameo is checked against THIS territory/language's
+    // own Regional Star Power: >=60 -> included in numerator+denominator like
+    // any other personnel; <60 -> excluded entirely from both numerator and
+    // denominator (zero effect, average identical to a no-Cameo calculation).
+    // Each Cameo and each territory/language are evaluated independently.
+    // Any caller that needs a Fan Following average for a given territory +
+    // language (Step 12B countries, Step 12C India languages, etc.) must call
+    // this function rather than re-implementing the average/eligibility logic.
+    function calculateStep12BFanFollowingForPersonnelInMarket(personnel, territory, language){
+        const list = Array.isArray(personnel) ? personnel : [];
+        if(!list.length || !territory) return null;
+        const values = [];
+        list.forEach(person => {
+            const value = getStep12BRegionalValue(person.talent, territory, language);
+            if(person.role === 'cameo'){
+                const numericValue = finiteStep12BNumber(value);
+                if(numericValue != null && numericValue >= STEP_12B_CAMEO_ELIGIBILITY_THRESHOLD){
+                    values.push(value);
+                }
+                return;
+            }
+            values.push(value);
+        });
+        return calculateStep12BFanFollowingFromValues(values);
+    }
+
     function calculateStep12BFanFollowingForCountry(movie, country){
         if(!movie || !country) return null;
         ensureMovieRegionalMarkets(movie);
@@ -15784,8 +15818,8 @@ function ensureGenreCombinationRating(movie){
 
         const personnel = getStep12BFanFollowingPersonnel(movie);
         if(!personnel.length) return null;
-        const values = personnel.map(person => getStep12BRegionalValue(person.talent, target, market.language || null));
-        return calculateStep12BFanFollowingFromValues(values);
+
+        return calculateStep12BFanFollowingForPersonnelInMarket(personnel, target, market.language || null);
     }
 
     function calculateStep12BFanFollowing(movie){
@@ -15827,6 +15861,9 @@ function ensureGenreCombinationRating(movie){
     window.calculateFanFollowing=calculateStep12BFanFollowing;
     window.calculateStep12BFanFollowingForCountry=calculateStep12BFanFollowingForCountry;
     window.calculateStep12BFanFollowingFromValues=calculateStep12BFanFollowingFromValues;
+    window.calculateStep12BFanFollowingForPersonnelInMarket=calculateStep12BFanFollowingForPersonnelInMarket;
+    window.getStep12BFanFollowingPersonnel=getStep12BFanFollowingPersonnel;
+    window.STEP_12B_CAMEO_ELIGIBILITY_THRESHOLD=STEP_12B_CAMEO_ELIGIBILITY_THRESHOLD;
     window.ensureStep12BFanFollowing=ensureStep12BFanFollowing;
     window.renderStep12BFanFollowing=renderStep12BFanFollowing;
     window.STEP_12B_VERSION=STEP_12B_VERSION;
@@ -16021,30 +16058,24 @@ function ensureGenreCombinationRating(movie){
         return Object.keys(STEP12C_INDIA_LANGUAGES).filter(lang=>access.some(v=>String(v||'').trim().toLowerCase()===lang.toLowerCase()));
     }
 
+    // Personnel list for India-language Fan Following. This must be the exact
+    // same personnel list Step 12B uses — no separate/duplicate roster.
     function step12CIndiaFanFollowingPersonnel(movie){
-        if(typeof getStep12BFanFollowingPersonnel==='function') return getStep12BFanFollowingPersonnel(movie);
-        const roles=['hero','villain','heroine','cameo','supporting'];
-        const personnel=[];
-        roles.forEach(role=>{
-            const list=Array.isArray(movie&&movie.cast&&movie.cast[role]) ? movie.cast[role] : [];
-            list.filter(Boolean).forEach(talent=>personnel.push({role,id:talent.id,name:talent.name||'Unknown',talent}));
-        });
-        if(movie&&movie.director) personnel.push({role:'director',id:movie.director.id,name:movie.director.name||'Unknown',talent:movie.director});
-        return personnel;
+        if(typeof window.getStep12BFanFollowingPersonnel==='function') return window.getStep12BFanFollowingPersonnel(movie);
+        return [];
     }
 
+    // Single source of calculation: delegates to the same Step 12B
+    // territory+language -> average helper (Cameo eligibility included) that
+    // Step 12B's country-wise Fan Following uses. There is no separate/old
+    // averaging logic here anymore — India-language Fan Following and
+    // country-wise Fan Following now always agree on how a Cameo is treated.
     function calculateStep12CIndiaLanguageFanFollowingForLanguage(movie, language){
         if(!movie || !language || !step12CApplicableIndiaLanguages(movie).includes(language)) return null;
+        if(typeof window.calculateStep12BFanFollowingForPersonnelInMarket!=='function') return null;
         const personnel=step12CIndiaFanFollowingPersonnel(movie);
         if(!personnel.length) return null;
-        const values=personnel.map(person=>{
-            if(typeof getRegionalStarPowerForMarket==='function') return finiteStep12C(getRegionalStarPowerForMarket(person.talent,'India',language));
-            if(typeof castRegionalStarPowerDirect==='function') return finiteStep12C(castRegionalStarPowerDirect(person.talent,'India',language));
-            if(typeof directorRegionalStarPowerDirect==='function') return finiteStep12C(directorRegionalStarPowerDirect(person.talent,'India',language));
-            return null;
-        });
-        if(values.some(v=>v==null)) return null;
-        return Number((values.reduce((a,b)=>a+b,0)/values.length).toFixed(4));
+        return window.calculateStep12BFanFollowingForPersonnelInMarket(personnel,'India',language);
     }
 
     function calculateStep12CIndiaLanguageFanFollowing(movie){
