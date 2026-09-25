@@ -1789,11 +1789,11 @@ body {
                 <div class="view-nav-header">
                     <div class="view-title-group">
                         <button class="header-btn" onclick="switchStudioSubView('dashboard')">➔ Back</button>
-                        <h2>🏆 Annual Studio Awards</h2>
+                        <h2>🏆 Studio Awards</h2>
                     </div>
                     <div>
                         <select id="awardsYearSelect" onchange="renderStudioAwardsView()" class="header-btn" style="outline:none;">
-                            <!-- Dynamically populated year options -->
+                            <!-- Dynamically populated 5-year cycle options -->
                         </select>
                     </div>
                 </div>
@@ -1801,7 +1801,7 @@ body {
                 <div class="awards-banner">
                     <div class="awards-banner-info">
                         <h3>👑 Cinema Academy Excellence Awards</h3>
-                        <p>Held annually between <strong>Week 3 and Week 10</strong>. Honors best achievements in story, ratings, and box office.</p>
+                        <p>Evaluated once every <strong>5 years</strong> (Biggest Worldwide Hit once every <strong>10 years</strong>). Honors best achievements in story, ratings, and box office.</p>
                     </div>
                 </div>
 
@@ -4876,150 +4876,6 @@ function renderStudioCalendarView() {
 /* ==========================================================================
    4. STUDIO AWARDS VIEW
    ========================================================================== */
-function calculateStudioAwardsForYearLegacy(yearVal) {
-    const yearlyMovies = gameState.completedMovies.filter(m => String(m.releaseDate ? m.releaseDate.year : '') === String(yearVal));
-    if (yearlyMovies.length === 0) return null;
-
-    const awardDefinitions = [
-        {
-            key: "best_movie",
-            category: "🏆 BEST MOVIE",
-            desc: "Overall best performance considering ratings and box office impact.",
-            evaluator: (movies) => [...movies].sort((a,b) => ((b.criticsRating || 0) + (b.audienceRating || 0) + ((b.lifetimeCollection || 0) / 10)) - ((a.criticsRating || 0) + (a.audienceRating || 0) + ((a.lifetimeCollection || 0) / 10)))[0]
-        },
-        {
-            key: "highest_rated",
-            category: "⭐ HIGHEST RATED MOVIE",
-            desc: "Highest combined Critics + Audience quality rating.",
-            evaluator: (movies) => [...movies].sort((a,b) => ((b.criticsRating || 0) + (b.audienceRating || 0)) - ((a.criticsRating || 0) + (a.audienceRating || 0)))[0]
-        },
-        {
-            key: "highest_grossing",
-            category: "💰 HIGHEST GROSSING MOVIE",
-            desc: "Highest Worldwide Lifetime theatrical collection.",
-            evaluator: (movies) => [...movies].sort((a,b) => (b.lifetimeCollection || 0) - (a.lifetimeCollection || 0))[0]
-        },
-        {
-            key: "biggest_opening",
-            category: "🚀 BIGGEST OPENING MOVIE",
-            desc: "Highest Opening Day / Weekend box office collection.",
-            evaluator: (movies) => [...movies].sort((a,b) => (b.openingWeekendCollection || 0) - (a.openingWeekendCollection || 0))[0]
-        },
-        {
-            key: "most_popular",
-            category: "🔥 MOST POPULAR MOVIE",
-            desc: "Highest cumulative audience popularity on week 1.",
-            evaluator: (movies) => [...movies].sort((a,b) => ((b.weeklyPopularity && b.weeklyPopularity[0]) || 0) - ((a.weeklyPopularity && a.weeklyPopularity[0]) || 0))[0]
-        },
-        {
-            key: "biggest_worldwide_hit",
-            category: "🌍 BIGGEST WORLDWIDE HIT",
-            desc: "Highest theatrical appeal across international markets.",
-            evaluator: (movies) => [...movies].sort((a,b) => (b.lifetimeCollection || 0) - (a.lifetimeCollection || 0))[0]
-        }
-    ];
-
-    let calculatedWinners = {};
-    awardDefinitions.forEach(def => {
-        let winnerMovie = def.evaluator(yearlyMovies);
-        if (winnerMovie) {
-            calculatedWinners[def.key] = {
-                categoryName: def.category,
-                desc: def.desc,
-                movieName: winnerMovie.name,
-                director: winnerMovie.director ? winnerMovie.director.name : '—',
-                lifetimeCollection: winnerMovie.lifetimeCollection
-            };
-        }
-    });
-
-    return calculatedWinners;
-}
-
-function renderStudioAwardsViewLegacy() {
-    const container = document.getElementById("awardsGridContainer");
-    if (!container) return;
-
-    const select = document.getElementById("awardsYearSelect");
-    if (select) {
-        let years = [...new Set(gameState.completedMovies.map(m => m.releaseDate ? m.releaseDate.year : gameState.currentYear))];
-        if (years.length === 0) years = [gameState.currentYear];
-        
-        let previousSelection = select.value;
-        select.innerHTML = years.map(y => `<option value="${y}">Year ${y} Awards</option>`).join('');
-        if (years.includes(parseInt(previousSelection))) {
-            select.value = previousSelection;
-        } else {
-            select.value = years[0];
-        }
-    }
-
-    const selectedYear = select ? select.value : String(gameState.currentYear);
-    
-    if (!gameState.awardsHistory[selectedYear]) {
-        let awards = calculateStudioAwardsForYear(selectedYear);
-        if (awards) {
-            gameState.awardsHistory[selectedYear] = awards;
-        }
-    }
-
-    const yearAwards = gameState.awardsHistory[selectedYear];
-
-    const awardSchema = [
-        { key: "best_movie", category: "🏆 BEST MOVIE", desc: "Overall best performance considering ratings and box office impact." },
-        { key: "highest_rated", category: "⭐ HIGHEST RATED MOVIE", desc: "Highest combined Critics + Audience quality rating." },
-        { key: "highest_grossing", category: "💰 HIGHEST GROSSING MOVIE", desc: "Highest Worldwide Lifetime theatrical collection." },
-        { key: "biggest_opening", category: "🚀 BIGGEST OPENING MOVIE", desc: "Highest Opening Day / Weekend box office collection." },
-        { key: "most_popular", category: "🔥 MOST POPULAR MOVIE", desc: "Highest cumulative audience popularity on week 1." },
-        { key: "biggest_worldwide_hit", category: "🌍 BIGGEST WORLDWIDE HIT", desc: "Highest theatrical appeal across international markets." }
-    ];
-
-    container.innerHTML = awardSchema.map(schema => {
-        const winner = yearAwards ? yearAwards[schema.key] : null;
-
-        if (!winner) {
-            return `
-                <div class="award-card">
-                    <div class="award-header">
-                        <div class="award-trophy">🏆</div>
-                        <div class="award-title-group">
-                            <h4>${schema.category}</h4>
-                            <p>${schema.desc}</p>
-                        </div>
-                    </div>
-                    <div class="award-winner-box">
-                        <div style="font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Winner</div>
-                        <div class="winner-movie-title" style="color:var(--text-dim);">—</div>
-                        <div class="winner-stat">No qualifying movies released in Year ${selectedYear} yet.</div>
-                    </div>
-                    <div class="award-reason">Awaiting theatrical release records to evaluate performance benchmarks.</div>
-                </div>
-            `;
-        }
-
-        return `
-            <div class="award-card">
-                <div class="award-header">
-                    <div class="award-trophy">🏆</div>
-                    <div class="award-title-group">
-                        <h4>${winner.categoryName}</h4>
-                        <p>${winner.desc}</p>
-                    </div>
-                </div>
-                <div class="award-winner-box">
-                    <div style="font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; font-weight:700;">Winner</div>
-                    <div class="winner-movie-title">${winner.movieName}</div>
-                    <div class="winner-stat">Director: ${winner.director}</div>
-                    <div class="winner-stat" style="color:var(--accent-cyan); margin-top:4px; font-weight:600;">
-                        Lifetime Collection: ${formatCollectionCr(winner.lifetimeCollection)}
-                    </div>
-                </div>
-                <div class="award-reason">Awarded based on Year ${selectedYear} Cinema Excellence metrics.</div>
-            </div>
-        `;
-    }).join('');
-}
-
 /* ==========================================================================
    5. GENRE TRENDS
    ========================================================================== */
@@ -8949,11 +8805,23 @@ function simulateOneWeekCore() {
 
     if (gameState.currentWeek === 3) {
         let prevYear = gameState.currentYear - 1;
-        if (!gameState.awardsHistory[prevYear]) {
-            let yearAwards = calculateStudioAwardsForYear(prevYear);
-            if (yearAwards) {
-                gameState.awardsHistory[prevYear] = yearAwards;
-                alert(`🏆 Annual Studio Awards evaluated for Year ${prevYear}! Visit the Awards Panel to view the results.`);
+        // 5-year award cycle closes exactly when prevYear completes it (Year
+        // 1-5, 6-10, 11-15, ...).
+        if (prevYear >= 1 && prevYear % 5 === 0) {
+            const cycleStart = prevYear - 4;
+            if (!gameState.awardsHistory[awardCycleKey5(cycleStart)]) {
+                let cycleAwards = calculateAward5YearCycle(cycleStart);
+                if (cycleAwards) {
+                    alert(`🏆 Studio Awards evaluated for Year ${cycleStart}-${prevYear}! Visit the Awards Panel to view the results.`);
+                }
+            }
+        }
+        // Biggest Worldwide Hit closes on its own 10-year cycle (Year 1-10,
+        // 11-20, ...).
+        if (prevYear >= 1 && prevYear % 10 === 0) {
+            const cycleStart10 = prevYear - 9;
+            if (!gameState.awardsHistory[awardCycleKey10(cycleStart10)]) {
+                calculateAward10YearCycle(cycleStart10);
             }
         }
     }
@@ -13003,20 +12871,6 @@ function movieProfitForAwards(m) {
     const revenue = safeNum(m.totalMovieRevenue || (safeNum(m.lifetimeCollection) + safeNum(m.ottActualRevenue)));
     return revenue - cost;
 }
-function movieOverallAwardScore(m) {
-    const collection = Math.min(100, safeNum(m.lifetimeCollection) / 30);
-    const profit = Math.min(100, Math.max(0, movieProfitForAwards(m)) / 25);
-    const roi = Math.min(100, Math.max(0, movieROIForAwards(m)) * 12);
-    const rating = Math.min(100, movieCombinedRating(m) * 10);
-    const opening = Math.min(100, safeNum(m.openingWeekendCollection) / 5);
-    const sustained = Array.isArray(m.weeklyCollections) && m.weeklyCollections.length
-        ? Math.min(100, (m.weeklyCollections.reduce((a,b)=>a+safeNum(b),0) / Math.max(1,m.weeklyCollections.length)) * 3)
-        : 0;
-    const popularity = Math.min(100, safeNum(m.popularity));
-    const verdict = HIT_STATUSES.includes(m.finalStatus) ? 100 : FLOP_STATUSES.includes(m.finalStatus) ? 20 : 60;
-    return (collection * 0.20) + (profit * 0.20) + (roi * 0.15) + (rating * 0.20) +
-           (opening * 0.05) + (sustained * 0.05) + (popularity * 0.10) + (verdict * 0.05);
-}
 function deterministicMovieCompare(a,b) {
     const p = movieProfitForAwards(b) - movieProfitForAwards(a);
     if (Math.abs(p) > 1e-9) return p;
@@ -13037,6 +12891,13 @@ function getLeadActorForAward(movie) {
 function getAllLeadActors(movie) {
     const cast = movie && movie.cast ? movie.cast : {};
     return [...(cast.hero || []), ...(cast.heroine || [])].filter(Boolean);
+}
+function getAllCastMembersForAward(movie) {
+    const cast = movie && movie.cast ? movie.cast : {};
+    const roles = ['hero', 'heroine', 'villain', 'supporting', 'cameo'];
+    const out = [];
+    roles.forEach(role => (Array.isArray(cast[role]) ? cast[role] : []).forEach(t => { if (t) out.push(t); }));
+    return out;
 }
 function ensureAwardStore() {
     ensureEcosystemDefaults(gameState);
@@ -13073,119 +12934,212 @@ function awardActorOnly(actor, awardKey, year, movie) {
     });
 }
 
-function calculateStudioAwardsForYear(yearVal) {
+/* ============================================================================
+   FINAL AWARD SYSTEM — 5-YEAR CYCLE (10-YEAR FOR BIGGEST WORLDWIDE HIT)
+   Replaces the old annual/yearly award system entirely. No box office,
+   rating, WOM, profit/ROI, lead-actor, or lifetime-collection formula is
+   touched here — this layer only groups the SAME existing completed-movie
+   data into 5-year (and 10-year) comparison windows and reuses the SAME
+   existing values (movieProfitForAwards, movieROIForAwards,
+   movieCombinedRating, boxOfficeWomScore, m.lifetimeCollection,
+   m.openingWeekendCollection, getLeadActorForAward) to pick winners.
+   ============================================================================ */
+const AWARD_OSCAR_THRESHOLD_CR = 3000;   // Oscar: Net Profit >= ₹3,000 Cr
+const AWARD_POPCORN_THRESHOLD_CR = 2000; // Popcorn Award: Lifetime WW Collection >= ₹2,000 Cr
+
+function get5YearCycleStart(year) {
+    const y = Number(year);
+    if (!Number.isFinite(y) || y < 1) return null;
+    return Math.floor((y - 1) / 5) * 5 + 1;
+}
+function get10YearCycleStart(year) {
+    const y = Number(year);
+    if (!Number.isFinite(y) || y < 1) return null;
+    return Math.floor((y - 1) / 10) * 10 + 1;
+}
+function awardCycleKey5(startYear) { return `cycle5_${startYear}-${startYear + 4}`; }
+function awardCycleKey10(startYear) { return `cycle10_${startYear}-${startYear + 9}`; }
+function completedMoviesForYearRange(startYear, endYear) {
+    return (gameState.completedMovies || []).filter(m => {
+        const y = awardMovieYear(m);
+        return isCompletedTheatricalMovie(m) && Number.isFinite(y) && y >= startYear && y <= endYear;
+    });
+}
+function available5YearCycleStarts() {
+    const years = [...new Set((gameState.completedMovies || []).map(m => awardMovieYear(m)).filter(Boolean))];
+    const starts = new Set();
+    years.forEach(y => { const s = get5YearCycleStart(y); if (s) starts.add(s); });
+    return [...starts].sort((a, b) => a - b);
+}
+
+/* ---- 5-year cycle awards: Best Movie, Highest Rated, Highest Grossing,
+   Biggest Opening, Most Popular, Oscar, Best Actor, Popcorn Award,
+   Popularity Award ---- */
+function calculateAward5YearCycle(startYearVal) {
     ensureAwardStore();
-    const year = Number(yearVal);
-    const yearlyMovies = completedMoviesForYear(year);
-    if (!yearlyMovies.length) return null;
+    const startYear = Number(startYearVal);
+    const endYear = startYear + 4;
+    const cycleMovies = completedMoviesForYearRange(startYear, endYear);
+    if (!cycleMovies.length) return null;
 
-    // A saved v2 result is historical truth. Never rewrite it because later
-    // years add more movies. Older saves get upgraded once to v2.
-    const existing = gameState.awardsHistory[String(year)];
-    if (existing && existing.__annualAwardsVersion === 2) {
-        // Historical winner categories are frozen. Threshold awards are the
-        // exception: they are achievement records, so a later movie from the
-        // same historical year may newly qualify without rewriting any winner.
-        const newlyEligible = completedMoviesForYear(year);
-        if (!Array.isArray(existing.oscar)) existing.oscar = [];
-        if (!Array.isArray(existing.popcorn_award)) existing.popcorn_award = [];
-        newlyEligible.forEach(m => {
-            if (movieProfitForAwards(m) >= 2000 && !existing.oscar.some(x => x.movieId === m.id)) {
-                existing.oscar.push({movieId:m.id,movieName:m.name,profit:movieProfitForAwards(m),reason:'Net movie profit ≥ ₹2,000 Cr.'});
-                awardMovie(m,'oscar',year,'Net movie profit ≥ ₹2,000 Cr.');
-            }
-            if (safeNum(m.lifetimeCollection) >= 1000 && !existing.popcorn_award.some(x => x.movieId === m.id)) {
-                existing.popcorn_award.push({movieId:m.id,movieName:m.name,lifetimeCollection:safeNum(m.lifetimeCollection),reason:'Completed theatrical worldwide collection ≥ ₹1,000 Cr.'});
-                awardMovie(m,'popcorn_award',year,'Completed theatrical worldwide collection ≥ ₹1,000 Cr.');
-            }
-        });
-        gameState.awardRecords[String(year)] = existing;
-        return existing;
-    }
+    // 1. BEST MOVIE — best existing Profit/ROI performance in the cycle.
+    const bestMovie = cycleMovies.slice().sort((a, b) => {
+        const p = movieProfitForAwards(b) - movieProfitForAwards(a);
+        if (Math.abs(p) > 1e-9) return p;
+        const r = movieROIForAwards(b) - movieROIForAwards(a);
+        if (Math.abs(r) > 1e-9) return r;
+        return deterministicMovieCompare(a, b);
+    })[0];
 
-    const highestGrossing = yearlyMovies.slice().sort((a,b) => {
-        const c = safeNum(b.lifetimeCollection) - safeNum(a.lifetimeCollection);
-        return c || deterministicMovieCompare(a,b);
-    })[0];
-    const bestMovie = yearlyMovies.slice().sort((a,b) => {
-        const c = movieOverallAwardScore(b) - movieOverallAwardScore(a);
-        return Math.abs(c) > 1e-9 ? c : deterministicMovieCompare(a,b);
-    })[0];
+    // 2. HIGHEST RATED — existing Critics + Audience combined rating.
+    const rated = cycleMovies.slice().sort((a, b) =>
+        (movieCombinedRating(b) - movieCombinedRating(a)) || deterministicMovieCompare(a, b))[0];
+
+    // 3. HIGHEST GROSSING — existing lifetime worldwide theatrical collection.
+    const highestGrossing = cycleMovies.slice().sort((a, b) =>
+        (safeNum(b.lifetimeCollection) - safeNum(a.lifetimeCollection)) || deterministicMovieCompare(a, b))[0];
+
+    // 4. BIGGEST OPENING — existing opening weekend collection.
+    const opening = cycleMovies.slice().sort((a, b) =>
+        (safeNum(b.openingWeekendCollection) - safeNum(a.openingWeekendCollection)) || deterministicMovieCompare(a, b))[0];
+
+    // 5. MOST POPULAR — existing WOM (word of mouth) score.
+    const mostPopular = cycleMovies.slice().sort((a, b) =>
+        (boxOfficeWomScore(b) - boxOfficeWomScore(a)) || deterministicMovieCompare(a, b))[0];
+
+    // 7. OSCAR — every completed movie with existing Net Profit >= ₹3,000 Cr.
+    const oscarMovies = cycleMovies.filter(m => movieProfitForAwards(m) >= AWARD_OSCAR_THRESHOLD_CR)
+        .sort(deterministicMovieCompare);
+
+    // 8. BEST ACTOR — existing Lead Actor of the cycle's highest-grossing movie.
     const bestActorMovie = highestGrossing;
     const bestActor = getLeadActorForAward(bestActorMovie);
-    const popcornMovies = yearlyMovies.filter(m => safeNum(m.lifetimeCollection) >= 1000)
-        .sort(deterministicMovieCompare);
-    const oscarMovies = yearlyMovies.filter(m => movieProfitForAwards(m) >= 2000)
+
+    // 9. POPCORN AWARD — every completed movie with existing lifetime WW
+    // collection >= ₹2,000 Cr.
+    const popcornMovies = cycleMovies.filter(m => safeNum(m.lifetimeCollection) >= AWARD_POPCORN_THRESHOLD_CR)
         .sort(deterministicMovieCompare);
 
-    // Popularity uses current + previous year, but the result is frozen under
-    // this award year's permanent record once calculated.
-    const popularityPool = [...completedMoviesForYear(year - 1), ...yearlyMovies];
-    const popularityMovie = popularityPool.length ? popularityPool.slice().sort((a,b) => {
-        const pa = safeNum(a.popularity) * 0.40 + safeNum(a.weeklyPopularity && a.weeklyPopularity[a.weeklyPopularity.length-1]) * 0.10;
-        const pb = safeNum(b.popularity) * 0.40 + safeNum(b.weeklyPopularity && b.weeklyPopularity[b.weeklyPopularity.length-1]) * 0.10;
-        const ca = Math.min(100, safeNum(a.lifetimeCollection) / 30);
-        const cb = Math.min(100, safeNum(b.lifetimeCollection) / 30);
-        const sa = pa + ca * 0.30 + Math.min(100, movieCombinedRating(a) * 10) * 0.20;
-        const sb = pb + cb * 0.30 + Math.min(100, movieCombinedRating(b) * 10) * 0.20;
-        return (sb - sa) || deterministicMovieCompare(a,b);
-    })[0] : null;
+    // 10. POPULARITY AWARD — actor with the most unique completed movies
+    // (existing cast data: hero, heroine, villain, supporting, cameo) within
+    // the cycle. An actor listed more than once in the same movie (e.g. a
+    // cameo role in addition to a lead role) still counts that movie once,
+    // via the per-actor movie-id Set. Star power/rating/collection/WOM/
+    // salary/market value are never used here — only unique movie count.
+    const actorMovieCounts = new Map();
+    cycleMovies.forEach(m => {
+        getAllCastMembersForAward(m).forEach(actor => {
+            const k = actorKey(actor);
+            if (!k) return;
+            if (!actorMovieCounts.has(k)) actorMovieCounts.set(k, { actor, movieIds: new Set() });
+            actorMovieCounts.get(k).movieIds.add(m.id);
+        });
+    });
+    let popularityEntry = null;
+    actorMovieCounts.forEach(entry => {
+        if (!popularityEntry) { popularityEntry = entry; return; }
+        if (entry.movieIds.size !== popularityEntry.movieIds.size) {
+            if (entry.movieIds.size > popularityEntry.movieIds.size) popularityEntry = entry;
+            return;
+        }
+        // Deterministic, stable tie-break: actor name, then actor id — never random.
+        const nameCmp = String(entry.actor.name || '').localeCompare(String(popularityEntry.actor.name || ''));
+        if (nameCmp < 0 || (nameCmp === 0 && String(entry.actor.id || '') < String(popularityEntry.actor.id || ''))) {
+            popularityEntry = entry;
+        }
+    });
+
+    const oscarReason = `Net movie profit ≥ ₹${AWARD_OSCAR_THRESHOLD_CR.toLocaleString('en-IN')} Cr.`;
+    const popcornReason = `Completed theatrical worldwide collection ≥ ₹${AWARD_POPCORN_THRESHOLD_CR.toLocaleString('en-IN')} Cr.`;
 
     const awards = {
-        __annualAwardsVersion: 2,
-        year,
+        __version: 5, cycleType: '5year', startYear, endYear,
         best_movie: bestMovie ? {
-            categoryName: '🏆 BEST MOVIE', desc: 'Best overall movie using a balanced performance score.',
+            categoryName: '🏆 BEST MOVIE', desc: 'Best Profit / ROI performance across the 5-year cycle.',
             movieId: bestMovie.id, movieName: bestMovie.name, director: bestMovie.director ? bestMovie.director.name : '—',
-            lifetimeCollection: safeNum(bestMovie.lifetimeCollection), score: Number(movieOverallAwardScore(bestMovie).toFixed(2)),
-            reason: 'Weighted overall performance: collection, profit/ROI, ratings, opening, sustained run, popularity and verdict.'
+            lifetimeCollection: safeNum(bestMovie.lifetimeCollection),
+            reason: `Highest Profit/ROI performance, Year ${startYear}-${endYear}.`
         } : null,
-        highest_rated: null,
+        highest_rated: rated ? {
+            categoryName: '⭐ HIGHEST RATED MOVIE', desc: 'Highest combined Critics + Audience rating across the 5-year cycle.',
+            movieId: rated.id, movieName: rated.name, director: rated.director ? rated.director.name : '—',
+            lifetimeCollection: safeNum(rated.lifetimeCollection),
+            reason: `Highest combined critics + audience rating, Year ${startYear}-${endYear}.`
+        } : null,
         highest_grossing: highestGrossing ? {
-            categoryName: '💰 HIGHEST GROSSING MOVIE', desc: 'Highest completed lifetime theatrical collection.',
+            categoryName: '💰 HIGHEST GROSSING MOVIE', desc: 'Highest lifetime worldwide theatrical collection across the 5-year cycle.',
             movieId: highestGrossing.id, movieName: highestGrossing.name, director: highestGrossing.director ? highestGrossing.director.name : '—',
-            lifetimeCollection: safeNum(highestGrossing.lifetimeCollection), reason: 'Highest completed theatrical lifetime collection.'
+            lifetimeCollection: safeNum(highestGrossing.lifetimeCollection),
+            reason: `Highest completed theatrical lifetime collection, Year ${startYear}-${endYear}.`
         } : null,
-        biggest_opening: null,
-        most_popular: null,
-        biggest_worldwide_hit: null,
-        oscar: oscarMovies.map(m => ({ movieId:m.id, movieName:m.name, profit:movieProfitForAwards(m), reason:'Net movie profit ≥ ₹2,000 Cr.' })),
-        best_actor: bestActor && bestActorMovie ? {
-            categoryName:'🎭 BEST ACTOR', desc:'Lead actor from the year’s highest-grossing completed theatrical movie.',
-            actorKey:actorKey(bestActor), actorName:bestActor.name, movieId:bestActorMovie.id, movieName:bestActorMovie.name,
-            lifetimeCollection:safeNum(bestActorMovie.lifetimeCollection), reason:'Highest-grossing completed theatrical movie; lead-role tie-break uses star power then overall rating.'
+        biggest_opening: opening ? {
+            categoryName: '🚀 BIGGEST OPENING MOVIE', desc: 'Highest opening weekend collection across the 5-year cycle.',
+            movieId: opening.id, movieName: opening.name, director: opening.director ? opening.director.name : '—',
+            lifetimeCollection: safeNum(opening.lifetimeCollection),
+            reason: `Highest opening weekend collection, Year ${startYear}-${endYear}.`
         } : null,
-        popcorn_award: popcornMovies.map(m => ({ movieId:m.id, movieName:m.name, lifetimeCollection:safeNum(m.lifetimeCollection), reason:'Completed theatrical worldwide collection ≥ ₹1,000 Cr.' })),
-        popularity_award: popularityMovie ? {
-            categoryName:'🔥 POPULARITY AWARD', desc:'Best sustained popularity across the current + previous year.',
-            movieId:popularityMovie.id, movieName:popularityMovie.name, reason:'Two-year rolling score using popularity, sustained box office and audience response.'
+        most_popular: mostPopular ? {
+            categoryName: '🔥 MOST POPULAR MOVIE', desc: 'Highest Word of Mouth (WOM) across the 5-year cycle.',
+            movieId: mostPopular.id, movieName: mostPopular.name, director: mostPopular.director ? mostPopular.director.name : '—',
+            lifetimeCollection: safeNum(mostPopular.lifetimeCollection),
+            reason: `Highest Word of Mouth (WOM), Year ${startYear}-${endYear}.`
+        } : null,
+        oscar: oscarMovies.map(m => ({ movieId: m.id, movieName: m.name, profit: movieProfitForAwards(m), reason: oscarReason })),
+        best_actor: (bestActor && bestActorMovie) ? {
+            categoryName: '🎭 BEST ACTOR', desc: 'Lead actor of the 5-year cycle\u2019s highest-grossing completed theatrical movie.',
+            actorKey: actorKey(bestActor), actorName: bestActor.name, movieId: bestActorMovie.id, movieName: bestActorMovie.name,
+            lifetimeCollection: safeNum(bestActorMovie.lifetimeCollection),
+            reason: `Lead actor of the highest-grossing completed movie, Year ${startYear}-${endYear}.`
+        } : null,
+        popcorn_award: popcornMovies.map(m => ({ movieId: m.id, movieName: m.name, lifetimeCollection: safeNum(m.lifetimeCollection), reason: popcornReason })),
+        popularity_award: popularityEntry ? {
+            categoryName: '🔥 POPULARITY AWARD', desc: 'Actor with the most completed movies across the 5-year cycle.',
+            actorKey: actorKey(popularityEntry.actor), actorName: popularityEntry.actor.name, movieCount: popularityEntry.movieIds.size,
+            reason: `Most completed movies (${popularityEntry.movieIds.size}), Year ${startYear}-${endYear}.`
         } : null
     };
 
-    // Preserve the legacy award categories that are still part of the game.
-    const rated = yearlyMovies.slice().sort((a,b) => (movieCombinedRating(b)-movieCombinedRating(a)) || deterministicMovieCompare(a,b))[0];
-    const opening = yearlyMovies.slice().sort((a,b) => (safeNum(b.openingWeekendCollection)-safeNum(a.openingWeekendCollection)) || deterministicMovieCompare(a,b))[0];
-    const popular = yearlyMovies.slice().sort((a,b) => (safeNum(b.weeklyPopularity && b.weeklyPopularity[0])-safeNum(a.weeklyPopularity && a.weeklyPopularity[0])) || deterministicMovieCompare(a,b))[0];
-    awards.highest_rated = rated ? { categoryName:'⭐ HIGHEST RATED MOVIE', desc:'Highest combined Critics + Audience rating.', movieId:rated.id, movieName:rated.name, director:rated.director ? rated.director.name : '—', lifetimeCollection:safeNum(rated.lifetimeCollection), reason:'Highest combined critics + audience rating.' } : null;
-    awards.biggest_opening = opening ? { categoryName:'🚀 BIGGEST OPENING MOVIE', desc:'Highest opening performance.', movieId:opening.id, movieName:opening.name, director:opening.director ? opening.director.name : '—', lifetimeCollection:safeNum(opening.lifetimeCollection), reason:'Highest opening weekend collection.' } : null;
-    awards.most_popular = popular ? { categoryName:'🔥 MOST POPULAR MOVIE', desc:'Highest week-one audience popularity.', movieId:popular.id, movieName:popular.name, director:popular.director ? popular.director.name : '—', lifetimeCollection:safeNum(popular.lifetimeCollection), reason:'Highest recorded week-one popularity.' } : null;
-    awards.biggest_worldwide_hit = awards.highest_grossing;
-
-    // Permanently index all awards. Re-running this function against the same
-    // v2 record returns early, so no duplicate actor/studio/stat awards occur.
-    yearlyMovies.forEach(m => {
-        if (awards.best_movie && awards.best_movie.movieId === m.id) awardMovie(m,'best_movie',year,awards.best_movie.reason);
-        if (awards.highest_rated && awards.highest_rated.movieId === m.id) awardMovie(m,'highest_rated',year,awards.highest_rated.reason);
-        if (awards.highest_grossing && awards.highest_grossing.movieId === m.id) awardMovie(m,'highest_grossing',year,awards.highest_grossing.reason);
-        if (awards.biggest_opening && awards.biggest_opening.movieId === m.id) awardMovie(m,'biggest_opening',year,awards.biggest_opening.reason);
-        if (awards.most_popular && awards.most_popular.movieId === m.id) awardMovie(m,'most_popular',year,awards.most_popular.reason);
-        if (awards.oscar.some(x => x.movieId === m.id)) awardMovie(m,'oscar',year,'Net movie profit ≥ ₹2,000 Cr.');
-        if (awards.popcorn_award.some(x => x.movieId === m.id)) awardMovie(m,'popcorn_award',year,'Completed theatrical worldwide collection ≥ ₹1,000 Cr.');
-        if (awards.popularity_award && awards.popularity_award.movieId === m.id) awardMovie(m,'popularity_award',year,awards.popularity_award.reason);
-        if (awards.best_actor && awards.best_actor.movieId === m.id) awardActorOnly(bestActor,'best_actor',year,m);
+    cycleMovies.forEach(m => {
+        if (awards.best_movie && awards.best_movie.movieId === m.id) awardMovie(m, 'best_movie', startYear, awards.best_movie.reason);
+        if (awards.highest_rated && awards.highest_rated.movieId === m.id) awardMovie(m, 'highest_rated', startYear, awards.highest_rated.reason);
+        if (awards.highest_grossing && awards.highest_grossing.movieId === m.id) awardMovie(m, 'highest_grossing', startYear, awards.highest_grossing.reason);
+        if (awards.biggest_opening && awards.biggest_opening.movieId === m.id) awardMovie(m, 'biggest_opening', startYear, awards.biggest_opening.reason);
+        if (awards.most_popular && awards.most_popular.movieId === m.id) awardMovie(m, 'most_popular', startYear, awards.most_popular.reason);
+        if (awards.oscar.some(x => x.movieId === m.id)) awardMovie(m, 'oscar', startYear, oscarReason);
+        if (awards.popcorn_award.some(x => x.movieId === m.id)) awardMovie(m, 'popcorn_award', startYear, popcornReason);
     });
-    gameState.awardsHistory[String(year)] = awards;
-    gameState.awardRecords[String(year)] = awards;
+    if (awards.best_actor) awardActorOnly(bestActor, 'best_actor', startYear, bestActorMovie);
+    if (awards.popularity_award) awardActorOnly(popularityEntry.actor, 'popularity_award', startYear, null);
+
+    gameState.awardsHistory[awardCycleKey5(startYear)] = awards;
+    gameState.awardRecords[awardCycleKey5(startYear)] = awards;
+    return awards;
+}
+
+/* ---- 10-year cycle award: Biggest Worldwide Hit ---- */
+function calculateAward10YearCycle(startYearVal) {
+    ensureAwardStore();
+    const startYear = Number(startYearVal);
+    const endYear = startYear + 9;
+    const cycleMovies = completedMoviesForYearRange(startYear, endYear);
+    if (!cycleMovies.length) return null;
+
+    const winner = cycleMovies.slice().sort((a, b) =>
+        (safeNum(b.lifetimeCollection) - safeNum(a.lifetimeCollection)) || deterministicMovieCompare(a, b))[0];
+
+    const awards = {
+        __version: 5, cycleType: '10year', startYear, endYear,
+        biggest_worldwide_hit: winner ? {
+            categoryName: '🌍 BIGGEST WORLDWIDE HIT', desc: 'Highest lifetime worldwide theatrical collection across the 10-year cycle.',
+            movieId: winner.id, movieName: winner.name, director: winner.director ? winner.director.name : '—',
+            lifetimeCollection: safeNum(winner.lifetimeCollection),
+            reason: `Highest completed theatrical lifetime worldwide collection, Year ${startYear}-${endYear}.`
+        } : null
+    };
+    if (winner) awardMovie(winner, 'biggest_worldwide_hit', startYear, awards.biggest_worldwide_hit.reason);
+
+    gameState.awardsHistory[awardCycleKey10(startYear)] = awards;
+    gameState.awardRecords[awardCycleKey10(startYear)] = awards;
     return awards;
 }
 
@@ -13194,24 +13148,30 @@ function renderStudioAwardsView() {
     if (!container) return;
     ensureAwardStore();
     const select = document.getElementById('awardsYearSelect');
-    const completedMovies = getAuthoritativeCompletedMovies();
-    let years = [...new Set(completedMovies.map(m => awardMovieYear(m)).filter(Boolean))].sort((a,b)=>a-b);
-    if (!years.length) years = [gameState.currentYear];
+    let starts5 = available5YearCycleStarts();
+    if (!starts5.length) starts5 = [get5YearCycleStart(gameState.currentYear) || 1];
     if (select) {
         const previous = Number(select.value);
-        select.innerHTML = years.map(y => `<option value="${y}">Year ${y} Awards</option>`).join('');
-        select.value = years.includes(previous) ? String(previous) : String(years[years.length-1]);
+        select.innerHTML = starts5.map(s => `<option value="${s}">Year ${s}-${s + 4} Awards</option>`).join('');
+        select.value = starts5.includes(previous) ? String(previous) : String(starts5[starts5.length - 1]);
     }
-    const year = Number(select ? select.value : gameState.currentYear);
-    let awards = gameState.awardsHistory[String(year)];
-    if (!awards || awards.__annualAwardsVersion !== 2) awards = calculateStudioAwardsForYear(year);
+    const startYear = Number(select ? select.value : (get5YearCycleStart(gameState.currentYear) || 1));
+    const endYear = startYear + 4;
+    const awards5 = calculateAward5YearCycle(startYear);
+    const startYear10 = get10YearCycleStart(startYear);
+    const endYear10 = startYear10 + 9;
+    const awards10 = calculateAward10YearCycle(startYear10);
+
     const schemas = [
-        ['best_movie','🏆 BEST MOVIE'],['highest_rated','⭐ HIGHEST RATED MOVIE'],['highest_grossing','💰 HIGHEST GROSSING MOVIE'],
-        ['biggest_opening','🚀 BIGGEST OPENING MOVIE'],['most_popular','🔥 MOST POPULAR MOVIE'],['biggest_worldwide_hit','🌍 BIGGEST WORLDWIDE HIT'],
-        ['oscar','🏅 OSCAR — PROFIT ≥ ₹2,000 Cr'],['best_actor','🎭 BEST ACTOR'],['popcorn_award','🍿 POPCORN AWARD — ₹1,000 Cr+'],['popularity_award','🔥 POPULARITY AWARD — TWO-YEAR ROLLING']
+        ['best_movie', '🏆 BEST MOVIE'], ['highest_rated', '⭐ HIGHEST RATED MOVIE'], ['highest_grossing', '💰 HIGHEST GROSSING MOVIE'],
+        ['biggest_opening', '🚀 BIGGEST OPENING MOVIE'], ['most_popular', '🔥 MOST POPULAR MOVIE'], ['biggest_worldwide_hit', '🌍 BIGGEST WORLDWIDE HIT'],
+        ['oscar', `🏅 OSCAR — PROFIT ≥ ₹${AWARD_OSCAR_THRESHOLD_CR.toLocaleString('en-IN')} Cr`], ['best_actor', '🎭 BEST ACTOR'],
+        ['popcorn_award', `🍿 POPCORN AWARD — ₹${AWARD_POPCORN_THRESHOLD_CR.toLocaleString('en-IN')} Cr+`], ['popularity_award', '🔥 POPULARITY AWARD']
     ];
-    container.innerHTML = schemas.map(([key,title]) => {
-        const value = awards ? awards[key] : null;
+    container.innerHTML = schemas.map(([key, title]) => {
+        const isWorldwideHit = key === 'biggest_worldwide_hit';
+        const value = isWorldwideHit ? (awards10 ? awards10[key] : null) : (awards5 ? awards5[key] : null);
+        const periodLabel = isWorldwideHit ? `Year ${startYear10}-${endYear10}` : `Year ${startYear}-${endYear}`;
         let winnerHtml = '—';
         let reason = 'No qualifying completed theatrical movie yet.';
         if (Array.isArray(value)) {
@@ -13219,9 +13179,9 @@ function renderStudioAwardsView() {
             reason = value.length ? (value[0].reason || 'Threshold satisfied.') : 'No qualifying movie.';
         } else if (value) {
             winnerHtml = `<div class="winner-movie-title">${escapeHtmlEco(value.actorName || value.movieName || '—')}</div>${value.movieName && value.actorName ? `<div class="winner-stat">Movie: ${escapeHtmlEco(value.movieName)}</div>` : ''}`;
-            reason = value.reason || value.desc || 'Awarded by annual analysis.';
+            reason = value.reason || value.desc || 'Awarded by cycle analysis.';
         }
-        return `<div class="award-card"><div class="award-header"><div class="award-trophy">🏆</div><div class="award-title-group"><h4>${title}</h4><p>Year ${year}</p></div></div><div class="award-winner-box"><div style="font-size:.7rem;color:var(--text-dim);text-transform:uppercase;font-weight:700;">Winner / Qualifiers</div>${winnerHtml}</div><div class="award-reason">${escapeHtmlEco(reason)}</div></div>`;
+        return `<div class="award-card"><div class="award-header"><div class="award-trophy">🏆</div><div class="award-title-group"><h4>${title}</h4><p>${periodLabel}</p></div></div><div class="award-winner-box"><div style="font-size:.7rem;color:var(--text-dim);text-transform:uppercase;font-weight:700;">Winner / Qualifiers</div>${winnerHtml}</div><div class="award-reason">${escapeHtmlEco(reason)}</div></div>`;
     }).join('');
 }
 
@@ -13494,16 +13454,17 @@ function openActorProfileDetail(key) {
 
 function getMovieAwardsWon(movie) {
     const won = [];
-    Object.keys(gameState.awardsHistory || {}).forEach(year => {
-        const ya = gameState.awardsHistory[year] || {};
+    Object.keys(gameState.awardsHistory || {}).forEach(cycleKey => {
+        const ya = gameState.awardsHistory[cycleKey] || {};
+        const period = (Number.isFinite(ya.startYear) && Number.isFinite(ya.endYear)) ? `Year ${ya.startYear}-${ya.endYear}` : cycleKey;
         Object.keys(ya).forEach(key => {
-            if (key === '__annualAwardsVersion' || key === 'year') return;
+            if (key === '__version' || key === 'cycleType' || key === 'startYear' || key === 'endYear') return;
             const v = ya[key];
-            if (Array.isArray(v)) v.forEach(x => { if (x && ((x.movieId && x.movieId === movie.id) || x.movieName === movie.name)) won.push(`${key} (${year})`); });
-            else if (v && ((v.movieId && v.movieId === movie.id) || v.movieName === movie.name)) won.push(`${key} (${year})`);
+            if (Array.isArray(v)) v.forEach(x => { if (x && ((x.movieId && x.movieId === movie.id) || x.movieName === movie.name)) won.push(`${key} (${period})`); });
+            else if (v && ((v.movieId && v.movieId === movie.id) || v.movieName === movie.name)) won.push(`${key} (${period})`);
         });
     });
-    (movie.awards || []).forEach(a => { const label = `${a.key} (${a.year})`; if (!won.includes(label)) won.push(label); });
+    (movie.awards || []).forEach(a => { const label = `${a.key} (Year ${a.year})`; if (!won.includes(label)) won.push(label); });
     return [...new Set(won)];
 }
 
@@ -13752,11 +13713,17 @@ function finalizeMovieRun(m, options = {}) {
     }
 }
 
-// Re-run awards exactly once for each historical year, while keeping already
-// versioned v2 winners immutable.
+// Re-run the 5-year and 10-year award cycles for every cycle that has at
+// least one completed movie.
 function finalizeHistoricalAwardsForAvailableYears() {
-    const years=[...new Set((gameState.completedMovies||[]).map(m=>awardMovieYear(m)).filter(Boolean))];
-    years.forEach(y=>{if(!gameState.awardsHistory[String(y)] || gameState.awardsHistory[String(y)].__annualAwardsVersion!==2)calculateStudioAwardsForYear(y);});
+    const years = [...new Set((gameState.completedMovies || []).map(m => awardMovieYear(m)).filter(Boolean))];
+    const starts5 = new Set(), starts10 = new Set();
+    years.forEach(y => {
+        const s5 = get5YearCycleStart(y); if (s5) starts5.add(s5);
+        const s10 = get10YearCycleStart(y); if (s10) starts10.add(s10);
+    });
+    starts5.forEach(s => calculateAward5YearCycle(s));
+    starts10.forEach(s => calculateAward10YearCycle(s));
 }
 
 function refreshStudioManagementDataViews(options = {}) {
@@ -13766,14 +13733,21 @@ function refreshStudioManagementDataViews(options = {}) {
     // Renderer-only: this function never creates, duplicates, moves, deletes,
     // or replaces movies[] / completedMovies / activeMovieId.
 
-    // A newly finalized movie may become eligible for the EXISTING annual award
-    // rules immediately. Re-run those same rules only when explicitly requested
-    // by the finalization lifecycle; this does not alter any award formula.
-    if (options.recalculateAwards && typeof calculateStudioAwardsForYear === 'function') {
+    // A newly finalized movie may become eligible for the EXISTING 5-year /
+    // 10-year award cycle rules immediately. Re-run those same rules only
+    // when explicitly requested by the finalization lifecycle; this does not
+    // alter any award formula.
+    if (options.recalculateAwards && typeof calculateAward5YearCycle === 'function') {
         const years = [...new Set((gameState.completedMovies || [])
             .map(m => awardMovieYear(m))
             .filter(Boolean))];
-        years.forEach(year => calculateStudioAwardsForYear(year));
+        const starts5 = new Set(), starts10 = new Set();
+        years.forEach(y => {
+            const s5 = get5YearCycleStart(y); if (s5) starts5.add(s5);
+            const s10 = get10YearCycleStart(y); if (s10) starts10.add(s10);
+        });
+        starts5.forEach(s => calculateAward5YearCycle(s));
+        starts10.forEach(s => calculateAward10YearCycle(s));
     }
 
     // Read fresh state for every renderer in the same render pass.
