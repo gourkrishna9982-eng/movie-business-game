@@ -1436,6 +1436,17 @@ body {
 
                 <!-- FOURTH ROW -->
                 <div class="dashboard-grid" style="margin-top: 18px;">
+                    <div class="dash-card" data-view="searchmovies" onclick="switchStudioSubView('searchmovies')">
+                        <div class="dash-card-left">
+                            <div class="dash-icon">🎬</div>
+                            <div class="dash-info">
+                                <h3>Search Movies</h3>
+                                <p>Search movies, actors, directors & writers</p>
+                            </div>
+                        </div>
+                        <span>➔</span>
+                    </div>
+
                     <div class="dash-card disabled" onclick="triggerPlaceholder('Top Franchises')">
                         <div class="dash-card-left">
                             <div class="dash-icon">🏆</div>
@@ -1636,6 +1647,25 @@ body {
                     Temporarily remove a completed movie from Industry Competition rankings, or add it back. This never deletes the movie or changes its history, collections, ratings or awards.
                 </p>
                 <div class="movies-list" id="compManageMovies"></div>
+            </section>
+
+            <!-- SUB-PANEL: SEARCH MOVIES -->
+            <section id="studio-sub-searchmovies" class="studio-sub-panel">
+                <div class="view-nav-header">
+                    <div class="view-title-group">
+                        <button class="header-btn" onclick="switchStudioSubView('dashboard')">➔ Back</button>
+                        <h2>🎬 Search Movies</h2>
+                    </div>
+                </div>
+                <div class="trends-controls">
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">
+                        Search your studio's complete movie history by movie, actor, director or writer name.
+                    </p>
+                    <input type="text" id="movieSearchInput" class="sb-input" placeholder="Search movie, actor, director or writer..." oninput="renderMovieSearchResults()" autocomplete="off">
+                </div>
+                <div class="movies-list" id="movieSearchResultsContainer">
+                    <!-- Dynamically populated by renderMovieSearchResults() -->
+                </div>
             </section>
 
             <!-- SUB-PANEL 2: STUDIO STATS -->
@@ -12305,6 +12335,96 @@ function renderCompetitionManageMovies(allMovies) {
     }).join('');
 }
 
+/* ==========================================================================
+   SEARCH MOVIES (additive, read-only)
+   ----------------------------------------------------------------------
+   Searches the existing authoritative movie history by movie name, cast
+   (hero/heroine/villain/supporting/cameo — all roles), director, or writer
+   name. Read-only: never mutates any movie, actor, director, or writer
+   record. Reuses getAuthoritativeCompletedMovies() as the single source of
+   truth and openMovieHistoryDetail() for the detail view — no duplicate
+   movie database or detail system is created here.
+   ========================================================================== */
+function findMoviesMatchingSearch(query) {
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return [];
+    const seenIds = new Set();
+    const matched = [];
+    const addMatch = (movie) => {
+        if (!movie || seenIds.has(movie.id)) return;
+        seenIds.add(movie.id);
+        matched.push(movie);
+    };
+    getAuthoritativeCompletedMovies().forEach(movie => {
+        // A) Movie name match
+        if (movie.name && String(movie.name).toLowerCase().includes(q)) { addMatch(movie); return; }
+        // B) Cast match — every existing role (hero, heroine, villain, supporting, cameo),
+        // deduped per movie via getMovieCastFlat()'s existing actorKey-based dedupe.
+        const castMatch = getMovieCastFlat(movie).some(c => c.talent && String(c.talent.name || '').toLowerCase().includes(q));
+        if (castMatch) { addMatch(movie); return; }
+        // C) Director match
+        if (movie.director && String(movie.director.name || '').toLowerCase().includes(q)) { addMatch(movie); return; }
+        // D) Writer match
+        if (movie.writer && String(movie.writer.name || '').toLowerCase().includes(q)) { addMatch(movie); return; }
+    });
+    return matched;
+}
+
+function renderMovieSearchResults() {
+    const container = document.getElementById('movieSearchResultsContainer');
+    if (!container) return;
+    const input = document.getElementById('movieSearchInput');
+    const q = input ? String(input.value || '').trim() : '';
+
+    if (!q) {
+        container.innerHTML = `
+            <div class="empty-state-card">
+                <div class="empty-state-icon">🔍</div>
+                <div class="empty-state-title">Search for a movie, actor, director or writer</div>
+            </div>`;
+        return;
+    }
+
+    const results = findMoviesMatchingSearch(q);
+    if (!results.length) {
+        container.innerHTML = `
+            <div class="empty-state-card">
+                <div class="empty-state-icon">🔍</div>
+                <div class="empty-state-title">No Results Found</div>
+                <div class="empty-state-sub">Try searching with a different movie, actor, director or writer name.</div>
+            </div>`;
+        return;
+    }
+
+    // Most recently released first — same convention as Released Movies.
+    container.innerHTML = results.slice().reverse().map(movie => {
+        let allCastNames = [];
+        ['hero', 'villain', 'heroine', 'supporting', 'cameo'].forEach(role => {
+            if (movie.cast && movie.cast[role]) {
+                movie.cast[role].forEach(t => allCastNames.push(t.name));
+            }
+        });
+        const releaseInfo = movie.releaseDate ? `Week ${movie.releaseDate.week} · Year ${movie.releaseDate.year}` : '—';
+        return `
+            <div class="movie-card history-card" onclick="openMovieHistoryDetail('${movie.id}')">
+                <div class="movie-header-info">
+                    <h3>🎬 ${escapeHtmlEco(movie.name || 'Untitled Movie')}</h3>
+                </div>
+                <div class="movie-badge-row">
+                    <span class="m-badge status-released">${movie.finalStatus || 'Released'}</span>
+                    <span class="m-badge">${releaseInfo}</span>
+                    <span class="m-badge">Genres: ${movie.genres ? movie.genres.join(", ") : '—'}</span>
+                </div>
+                <div class="movie-details-grid">
+                    <div class="movie-detail-item"><label>🎬 Director</label><span>${movie.director ? escapeHtmlEco(movie.director.name) : '—'}</span></div>
+                    <div class="movie-detail-item"><label>✍️ Writer</label><span>${movie.writer ? escapeHtmlEco(movie.writer.name) : '—'}</span></div>
+                    <div class="movie-detail-item"><label>👥 Cast</label><span>${allCastNames.length ? escapeHtmlEco(allCastNames.slice(0, 3).join(", ")) : '—'}</span></div>
+                    <div class="movie-detail-item"><label>💰 Box Office</label><span>${formatCollectionCr(movie.lifetimeCollection)}</span></div>
+                </div>
+            </div>`;
+    }).join('');
+}
+
 // Global initialization routine
 document.addEventListener("DOMContentLoaded", () => {
     gameState.genreData = JSON.parse(JSON.stringify(defaultGenreTrends));
@@ -13883,6 +14003,7 @@ function refreshStudioManagementDataViews(options = {}) {
     renderIndustryCompetitionView();
     renderIndustryEventsView();
     renderActorRankingView();
+    renderMovieSearchResults();
 
     const finalMovie = getActiveMovie() || getAuthoritativeCompletedMovies().slice(-1)[0];
     if (finalMovie && finalMovie.marketRunComplete) {
