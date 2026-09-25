@@ -1630,6 +1630,12 @@ body {
 
                 <div class="stats-section-title">📈 MOST POPULAR</div>
                 <div class="movies-list" id="compMostPopular"></div>
+
+                <div class="stats-section-title">🎬 MANAGE COMPETITION MOVIES</div>
+                <p style="color: var(--text-muted); font-size: 0.85rem; margin: -4px 0 10px;">
+                    Temporarily remove a completed movie from Industry Competition rankings, or add it back. This never deletes the movie or changes its history, collections, ratings or awards.
+                </p>
+                <div class="movies-list" id="compManageMovies"></div>
             </section>
 
             <!-- SUB-PANEL 2: STUDIO STATS -->
@@ -3654,6 +3660,83 @@ function getGlobalRecordMovie() {
   })[0] || null;
 }
 
+/* ==========================================================================
+   INDUSTRY COMPETITION — MOVIE INCLUDE/EXCLUDE (additive, non-destructive)
+   ----------------------------------------------------------------------
+   This never deletes a movie or mutates its real stats (lifetimeCollection,
+   openingWeekendCollection, ratings, awards, cast, productionHouseId, etc).
+   It only flags whether a movie should be *counted* in the derived Industry
+   Competition rankings below. Every other system (Movie History, Production
+   House stats, Actor career records, Most Popular) keeps reading the full,
+   untouched gameState.completedMovies exactly as before.
+   ========================================================================== */
+function isMovieExcludedFromCompetition(movie) {
+  return !!(movie && movie.excludedFromCompetition);
+}
+
+// Single source of truth for which movies count toward Industry Competition
+// rankings. Derives a filtered VIEW only — never mutates gameState.completedMovies.
+function getCompetitionEligibleMovies() {
+  return getAuthoritativeCompletedMovies().filter(m => !isMovieExcludedFromCompetition(m));
+}
+
+// Same record-holder logic as getGlobalRecordMovie(), but scoped to the
+// Industry Competition's eligible (non-excluded) movies only. The original
+// getGlobalRecordMovie() is left untouched since it's also used elsewhere
+// (e.g. new-record notifications) outside the competition context.
+function getGlobalRecordMovieForCompetition(eligibleMovies) {
+  return (eligibleMovies || []).filter(m => isCompletedTheatricalMovie(m)).slice().sort((a,b) => {
+    const c = safeNum(b.lifetimeCollection) - safeNum(a.lifetimeCollection);
+    return Math.abs(c) > 1e-9 ? c : String(a.id || a.name || '').localeCompare(String(b.id || b.name || ''));
+  })[0] || null;
+}
+
+// Actor totals for Industry Competition's "Top Actors (Worldwide Box Office)"
+// ONLY — a derived aggregation over eligible (non-excluded) movies. This is a
+// separate function from computeActorCareerStats() on purpose: Actor Rankings,
+// actor profiles, and Most Popular must keep showing the actor's real, full
+// career (all movies) untouched. Excluding a movie here never edits the actor.
+function computeActorCompetitionStats(key) {
+  const talent = findTalentByKey(key);
+  const movies = getCompetitionEligibleMovies().filter(m =>
+    getMovieCastFlat(m).some(c => actorKey(c.talent) === key)
+  );
+  const totalBoxOffice = movies.reduce((s, m) => s + (m.lifetimeCollection || 0), 0);
+  return {
+    talent, key,
+    name: talent ? talent.name : 'Unknown Actor',
+    totalMovies: movies.length,
+    totalBoxOffice: parseFloat(totalBoxOffice.toFixed(2)),
+    movies
+  };
+}
+
+function getAllActorsWithCompetitionCareers() {
+  return getCombinedTalentPool()
+    .map(t => computeActorCompetitionStats(actorKey(t)))
+    .filter(a => a.totalMovies > 0);
+}
+
+// Toggle a single completed movie's Industry Competition inclusion. Never
+// deletes the movie or touches its real stats/cast/production-house record —
+// gameState is already a reactive proxy, so this one flag flip auto-persists
+// through the existing save/load architecture (no new save system needed).
+function toggleMovieCompetitionInclusion(movieId) {
+  const movie = (gameState.completedMovies || []).find(m => m.id === movieId);
+  if (!movie) return;
+  movie.excludedFromCompetition = !movie.excludedFromCompetition;
+  if (typeof triggerToast === 'function') {
+    triggerToast(movie.excludedFromCompetition
+      ? `➖ ${movie.name || 'Movie'} removed from Industry Competition`
+      : `➕ ${movie.name || 'Movie'} added back to Industry Competition`);
+  }
+  if (typeof refreshStudioManagementDataViews === 'function') {
+    refreshStudioManagementDataViews();
+  } else if (typeof renderIndustryCompetitionView === 'function') {
+    renderIndustryCompetitionView();
+  }
+}
+
 function renderGlobalBoxOfficeAchievement(movie) {
   const card = document.getElementById('frGlobalBoxOfficeAchievement');
   if (!card || !movie) return;
@@ -3697,6 +3780,10 @@ function ensureEcosystemDefaults(state) {
     if (m.franchiseId === undefined) m.franchiseId = null;
     if (!Array.isArray(m.globalBoxOfficeNotifiedMilestones)) m.globalBoxOfficeNotifiedMilestones = [];
     if (m.globalBoxOfficeRecordNotified === undefined) m.globalBoxOfficeRecordNotified = false;
+    // Industry Competition include/exclude toggle (additive, safe-default).
+    // Every existing/old-save movie defaults to INCLUDED — this never hides
+    // or removes anything unless the player manually excludes it.
+    if (m.excludedFromCompetition === undefined) m.excludedFromCompetition = false;
     if (isCompletedTheatricalMovie(m)) syncGlobalBoxOfficeAchievement(m, { fromMigration: true });
   };
   (state.movies || []).forEach(fixMovie);
@@ -12121,6 +12208,10 @@ function competitionRow(rank, title, subtitle, value) {
 
 function renderIndustryCompetitionView() {
     const allMovies = getAuthoritativeCompletedMovies();
+    // Movie-based Industry Competition rankings only ever read this filtered
+    // (excluded movies removed) view. Production Houses, Actor Rankings and
+    // Most Popular deliberately keep using the full, untouched movie list.
+    const eligibleMovies = getCompetitionEligibleMovies();
     const actors = getAllActorsWithCareers();
     let houses = (gameState.productionHouses || []).map(ph => ({ ph, stats: computeProductionHouseStats(ph.id) }))
         .filter(h => h.stats.totalMovies > 0);
@@ -12137,26 +12228,29 @@ function renderIndustryCompetitionView() {
         }
     }
 
-    // TOP ACTORS (by worldwide box office)
-    const topActors = [...actors].sort((a, b) => b.totalBoxOffice - a.totalBoxOffice).slice(0, 5);
+    // TOP ACTORS (by worldwide box office) — Industry Competition-only totals,
+    // derived from eligible (non-excluded) movies. Actor Rankings / profiles
+    // are untouched (they use the separate, career-wide `actors` above).
+    const competitionActors = getAllActorsWithCompetitionCareers();
+    const topActors = [...competitionActors].sort((a, b) => b.totalBoxOffice - a.totalBoxOffice).slice(0, 5);
     renderLeaderboardList('compTopActors', topActors, (a, i) => competitionRow(i + 1, a.name, a.totalMovies + ' movies', formatCollectionCr(a.totalBoxOffice)));
 
-    // TOP PRODUCTION HOUSES (by worldwide box office)
+    // TOP PRODUCTION HOUSES (by worldwide box office) — untouched by exclusion
     const topHouses = [...houses].sort((a, b) => b.stats.totalBoxOffice - a.stats.totalBoxOffice).slice(0, 5);
     renderLeaderboardList('compTopProductionHouses', topHouses, (h, i) => competitionRow(i + 1, h.ph.name, h.stats.totalMovies + ' movies', formatCollectionCr(h.stats.totalBoxOffice)));
 
     // TOP MOVIES / TOP WORLDWIDE GROSSERS (by lifetime collection)
-    const topGrossers = [...allMovies].sort((a, b) => (b.lifetimeCollection || 0) - (a.lifetimeCollection || 0)).slice(0, 5);
+    const topGrossers = [...eligibleMovies].sort((a, b) => (b.lifetimeCollection || 0) - (a.lifetimeCollection || 0)).slice(0, 5);
     renderLeaderboardList('compTopMovies', topGrossers, (m, i) => competitionRow(i + 1, m.name, getProductionHouseName(m.productionHouseId), formatCollectionCr(m.lifetimeCollection)));
     renderLeaderboardList('compTopGrossers', topGrossers, (m, i) => competitionRow(i + 1, m.name, m.finalStatus, formatCollectionCr(m.lifetimeCollection)));
 
-    const topGlobalGrossers = [...allMovies]
+    const topGlobalGrossers = [...eligibleMovies]
         .sort((a,b) => safeNum(b.lifetimeCollection) - safeNum(a.lifetimeCollection))
         .slice(0, 10);
     topGlobalGrossers.forEach(m => syncGlobalBoxOfficeAchievement(m, { notify: false }));
     renderLeaderboardList('compTopGlobalGrossers', topGlobalGrossers, (m, i) => globalCompetitionRow(i + 1, m));
 
-    const globalRecord = getGlobalRecordMovie();
+    const globalRecord = getGlobalRecordMovieForCompetition(eligibleMovies);
     renderLeaderboardList('compGlobalRecord', globalRecord ? [globalRecord] : [], (m) => `
         <div class="movie-card" style="padding:14px 16px;">
             <div class="movie-header-info"><h3>💎 ${m.name || 'Untitled Movie'}</h3></div>
@@ -12169,20 +12263,46 @@ function renderIndustryCompetitionView() {
         </div>`);
 
     // TOP OPENINGS
-    const topOpenings = [...allMovies].sort((a, b) => (b.openingWeekendCollection || 0) - (a.openingWeekendCollection || 0)).slice(0, 5);
+    const topOpenings = [...eligibleMovies].sort((a, b) => (b.openingWeekendCollection || 0) - (a.openingWeekendCollection || 0)).slice(0, 5);
     renderLeaderboardList('compTopOpenings', topOpenings, (m, i) => competitionRow(i + 1, m.name, getProductionHouseName(m.productionHouseId), formatCollectionCr(m.openingWeekendCollection)));
 
     // MOST AWARDED (movies, aggregated to actor + house level already covered above; here: movies with most award categories)
-    const awardedMovies = allMovies
+    const awardedMovies = eligibleMovies
         .map(m => ({ m, count: getMovieAwardsWon(m).length }))
         .filter(x => x.count > 0)
         .sort((a, b) => b.count - a.count)
         .slice(0, 5);
     renderLeaderboardList('compMostAwarded', awardedMovies, (x, i) => competitionRow(i + 1, x.m.name, getProductionHouseName(x.m.productionHouseId), x.count + ' award(s)'));
 
-    // MOST POPULAR (actors by popularity)
+    // MOST POPULAR (actors by popularity) — untouched, career-wide as before
     const popularActors = [...actors].sort((a, b) => b.popularity - a.popularity).slice(0, 5);
     renderLeaderboardList('compMostPopular', popularActors, (a, i) => competitionRow(i + 1, a.name, a.talent ? a.talent.industry : '', a.popularity + ' popularity'));
+
+    // MANAGE COMPETITION MOVIES — per-movie Remove/Add control (additive UI)
+    renderCompetitionManageMovies(allMovies);
+}
+
+function renderCompetitionManageMovies(allMovies) {
+    const container = document.getElementById('compManageMovies');
+    if (!container) return;
+    const movies = allMovies || getAuthoritativeCompletedMovies();
+    if (!movies.length) {
+        container.innerHTML = `<div class="movie-detail-item"><span>No completed movies yet.</span></div>`;
+        return;
+    }
+    container.innerHTML = movies.slice().reverse().map(m => {
+        const excluded = isMovieExcludedFromCompetition(m);
+        return `
+        <div class="movie-card" style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; gap:10px; flex-wrap:wrap;">
+            <span style="max-width:60%; color:var(--text-main); font-size:13px;">
+                ${escapeHtmlEco(m.name || 'Untitled Movie')}
+                <span style="display:block; color:var(--text-dim); font-size:11px; margin-top:3px;">${excluded ? '🚫 Excluded from Industry Competition' : '✅ Included in Industry Competition'}</span>
+            </span>
+            <button class="sim-btn ${excluded ? 'sim-btn-confirm' : 'sim-btn-cancel'}" style="width:auto; padding:7px 14px; font-size:12px;" onclick="toggleMovieCompetitionInclusion('${m.id}')">
+                ${excluded ? '➕ Add to Industry Competition' : '➖ Remove from Industry Competition'}
+            </button>
+        </div>`;
+    }).join('');
 }
 
 // Global initialization routine
