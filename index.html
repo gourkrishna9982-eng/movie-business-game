@@ -4626,7 +4626,7 @@ function renderStudioMoviesView() {
         <div class="movie-slate-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
             <div style="font-size:13px; color:#64748b;">Active Projects: ${moviesList.length} / ${MAX_ACTIVE_MOVIES}</div>
             ${moviesList.length < MAX_ACTIVE_MOVIES
-                ? `<button class="sim-btn sim-btn-confirm" style="width:auto; padding:6px 14px;" onclick="showView('scriptBasicsView')">+ Start New Movie</button>`
+                ? `<button class="sim-btn sim-btn-confirm" style="width:auto; padding:6px 14px;" onclick="openScriptBasics()">+ Start New Movie</button>`
                 : `<span style="font-size:12px; color:#94a3b8;">All ${MAX_ACTIVE_MOVIES} project slots in use</span>`}
         </div>
     `;
