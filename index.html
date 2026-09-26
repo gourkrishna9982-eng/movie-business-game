@@ -3803,18 +3803,19 @@ function ensureEcosystemDefaults(state) {
   if (!state.industryEventState || typeof state.industryEventState !== 'object') state.industryEventState = { lastEventWeek: 0, lastEventYear: state.currentYear || 2000 };
   const fixMovie = (m) => {
     if (!m) return;
-    if (!m.productionHouseId) m.productionHouseId = 'main';
-    if (m.distributorId === undefined) m.distributorId = null;
-    if (!Array.isArray(m.awards)) m.awards = [];
-    if (!Array.isArray(m.marketValueEffects)) m.marketValueEffects = [];
-    if (m.franchiseId === undefined) m.franchiseId = null;
-    if (!Array.isArray(m.globalBoxOfficeNotifiedMilestones)) m.globalBoxOfficeNotifiedMilestones = [];
-    if (m.globalBoxOfficeRecordNotified === undefined) m.globalBoxOfficeRecordNotified = false;
+    let changed = false;
+    if (!m.productionHouseId) { m.productionHouseId = 'main'; changed = true; }
+    if (m.distributorId === undefined) { m.distributorId = null; changed = true; }
+    if (!Array.isArray(m.awards)) { m.awards = []; changed = true; }
+    if (!Array.isArray(m.marketValueEffects)) { m.marketValueEffects = []; changed = true; }
+    if (m.franchiseId === undefined) { m.franchiseId = null; changed = true; }
+    if (!Array.isArray(m.globalBoxOfficeNotifiedMilestones)) { m.globalBoxOfficeNotifiedMilestones = []; changed = true; }
+    if (m.globalBoxOfficeRecordNotified === undefined) { m.globalBoxOfficeRecordNotified = false; changed = true; }
     // Industry Competition include/exclude toggle (additive, safe-default).
     // Every existing/old-save movie defaults to INCLUDED — this never hides
     // or removes anything unless the player manually excludes it.
-    if (m.excludedFromCompetition === undefined) m.excludedFromCompetition = false;
-    if (isCompletedTheatricalMovie(m)) syncGlobalBoxOfficeAchievement(m, { fromMigration: true });
+    if (m.excludedFromCompetition === undefined) { m.excludedFromCompetition = false; changed = true; }
+    if (changed && isCompletedTheatricalMovie(m)) syncGlobalBoxOfficeAchievement(m, { fromMigration: true });
   };
   (state.movies || []).forEach(fixMovie);
   (state.completedMovies || []).forEach(fixMovie);
@@ -8968,8 +8969,10 @@ function confirmMultipleSim() {
         simulateOneWeek();
     }
     // Make a checkpoint immediately after a multi-week simulation instead of
-    // relying only on the 900ms debounce.
-    scheduleSave();
+    // relying only on the 900ms debounce. Cancel the pending debounce first
+    // so the same final state is not serialized/saved twice.
+    clearTimeout(saveDebounceTimer);
+    saveDebounceTimer = null;
     persistGameState();
     closeSimModal();
 }
@@ -12800,11 +12803,14 @@ function makeReactive(value, onChange) {
   // graphs cannot cause recursive wrapping.
   const proxy = new Proxy(value, {
     set(target, prop, val) {
-      target[prop] = makeReactive(val, onChange);
+      const nextValue = makeReactive(val, onChange);
+      if (Object.is(target[prop], nextValue)) return true;
+      target[prop] = nextValue;
       onChange();
       return true;
     },
     deleteProperty(target, prop) {
+      if (!Object.prototype.hasOwnProperty.call(target, prop)) return true;
       delete target[prop];
       onChange();
       return true;
@@ -13446,16 +13452,17 @@ function initializeActorMarketValues(records) {
 }
 function getActorMarketState(talent) {
     if (!talent) return { baseMarketValue:0,currentMarketValue:0,history:[] };
-    ensureEcosystemDefaults(gameState);
+    if (!gameState.actorMarketValues || typeof gameState.actorMarketValues !== 'object') ensureEcosystemDefaults(gameState);
     const key = actorKey(talent);
     const base = safeNum(talent.baseMarketValue) || parseSalaryToNumber(talent.salary) || 1;
     if (!gameState.actorMarketValues[key]) gameState.actorMarketValues[key] = { baseMarketValue:base,currentMarketValue:base,history:[] };
     const st = gameState.actorMarketValues[key];
-    st.baseMarketValue = base;
+    if (st.baseMarketValue !== base) st.baseMarketValue = base;
     if (!Array.isArray(st.history)) st.history=[];
     talent.baseMarketValue = base;
-    talent.currentMarketValue = safeNum(st.currentMarketValue) || base;
-    st.currentMarketValue = talent.currentMarketValue;
+    const current = safeNum(st.currentMarketValue) || base;
+    talent.currentMarketValue = current;
+    if (st.currentMarketValue !== current) st.currentMarketValue = current;
     return st;
 }
 function updateActorMarketValue(talent, factor, reason) {
@@ -13644,9 +13651,12 @@ function handleFranchiseModeChange() {
     }
 }
 function initializeNewFeatureUI() {
-    ensureEcosystemDefaults(gameState);
-    initializeActorMarketValues([...(EMBEDDED_ACTORS_DATA||[]),...(EMBEDDED_ACTRESSES_DATA||[])]);
-    handleFranchiseModeChange();
+    if (initializeNewFeatureUI._initializedState !== gameState) {
+        ensureEcosystemDefaults(gameState);
+        initializeActorMarketValues([...(EMBEDDED_ACTORS_DATA||[]),...(EMBEDDED_ACTRESSES_DATA||[])]);
+        handleFranchiseModeChange();
+        initializeNewFeatureUI._initializedState = gameState;
+    }
     const dash=document.querySelector('#studioDashboardView .dashboard-grid');
     if(dash && !document.getElementById('franchiseDashCard')){
         dash.insertAdjacentHTML('beforeend','<div id="franchiseDashCard" class="dash-card" onclick="openStudioDashboardSub(\'franchises\')"><div class="dash-card-left"><div class="dash-icon">🎬</div><div class="dash-info"><h3>Franchise / Universe</h3><p>Series statistics and sequels</p></div></div><span>›</span></div>');
@@ -14017,7 +14027,7 @@ renderStudioDashboardViews = function() {
     _originalRenderStudioDashboardViews();
     initializeNewFeatureUI();
     finalizeHistoricalAwardsForAvailableYears();
-    renderFranchiseView(); renderIndustryEventsView(); renderActorRankingView();
+    renderFranchiseView(); renderIndustryEventsView();
     refreshStudioManagementDataViews();
 };
 
