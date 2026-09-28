@@ -6873,9 +6873,48 @@ function renderTerritoryBoxOfficeHtml(movie) {
         const latestWom = weekly.length ? Number(weekly[weekly.length-1].wom || 0) : Number(rec.wom || 0);
         const daily = weekly.length ? weekly[weekly.length-1].dailyCollections || [] : [];
         const dailyTotal = daily.reduce((s,v)=>s+Number(v||0),0);
+        // India language-wise breakdown (display only). Opening is read from the
+        // stored Step 12C values; Weekly (latest) is the stored India weekly value
+        // split by each active language's opening share. Nothing is recalculated
+        // or written back to the movie.
+        let cardLabel = `${TERRITORY_META[t].flag} ${t}`;
+        let indiaOpening = rec.opening;
+        let indiaWeekly = latestWeekly;
+        if (t === 'India') {
+            const INDIA_LANG_ORDER = ['Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam'];
+            const langSrc = movie.openingWeekCollectionByIndiaLanguage ||
+                (movie._step12COpeningWeek && movie._step12COpeningWeek.byIndiaLanguage) || {};
+            const langs = INDIA_LANG_ORDER.filter(l => langSrc[l] && Number.isFinite(Number(langSrc[l].openingWeekCollection)));
+            if (langs.length) {
+                const opens = {};
+                langs.forEach(l => { opens[l] = Number(langSrc[l].openingWeekCollection || 0); });
+                const openSum = langs.reduce((sum, l) => sum + opens[l], 0);
+                const vals = {};
+                if (weekly.length <= 1) {
+                    langs.forEach(l => { vals[l] = opens[l]; });
+                } else {
+                    let assigned = 0, biggest = langs[0];
+                    langs.forEach(l => {
+                        vals[l] = openSum > 0 ? Number((latestWeekly * opens[l] / openSum).toFixed(2)) : 0;
+                        assigned += vals[l];
+                        if (opens[l] > opens[biggest]) biggest = l;
+                    });
+                    if (openSum > 0) vals[biggest] = Number((vals[biggest] + (latestWeekly - assigned)).toFixed(2));
+                }
+                langs.forEach(l => {
+                    html += `<div class="movie-detail-item" style="padding:14px;border:1px solid rgba(148,163,184,.18);border-radius:12px;">
+            <label>${TERRITORY_META[t].flag} ${t.toUpperCase()} · ${l.toUpperCase()}</label>
+            <span><strong>Opening:</strong> ${formatTerritoryGross(opens[l])} · <strong>Weekly (latest):</strong> ${formatTerritoryGross(vals[l])}</span>
+        </div>`;
+                });
+                indiaOpening = Number(openSum.toFixed(2));
+                indiaWeekly = Number(langs.reduce((sum, l) => sum + vals[l], 0).toFixed(2));
+                cardLabel = `${TERRITORY_META[t].flag} ${t.toUpperCase()} TOTAL`;
+            }
+        }
         html += `<div class="movie-detail-item" style="padding:14px;border:1px solid rgba(148,163,184,.18);border-radius:12px;">
-            <label>${TERRITORY_META[t].flag} ${t}</label>
-            <span><strong>Opening:</strong> ${formatTerritoryGross(rec.opening)} · <strong>Weekly (latest):</strong> ${formatTerritoryGross(latestWeekly)}<br>
+            <label>${cardLabel}</label>
+            <span><strong>Opening:</strong> ${formatTerritoryGross(indiaOpening)} · <strong>Weekly (latest):</strong> ${formatTerritoryGross(indiaWeekly)}<br>
             <strong>Daily (latest week):</strong> ${formatTerritoryGross(dailyTotal)} · <strong>Screens:</strong> ${latestScreens.toLocaleString('en-IN')}<br>
             <strong>Final Gross:</strong> ${formatTerritoryGross(rec.finalGross)} · <strong>Release Cost:</strong> ${formatTerritoryGross(rec.releaseCost)} · <strong>Release ROI:</strong> ${formatTerritoryGross(rec.releaseROI)}<br>
             <strong>Occupancy:</strong> ${avgOcc ? avgOcc.toFixed(0)+'% avg / '+peakOcc+'% peak' : '—'} · <strong>Competition:</strong> ${latestCompetition.toFixed(2)}×<br>
@@ -11530,6 +11569,34 @@ function renderReleaseDashboard() {
                 value=0;
             }
             const meta = TERRITORY_META[t] || {};
+            if (t === 'India') {
+                // Display-only India language breakdown. Week 1 shows the stored
+                // Step 12C language values directly; Week 2+ splits the stored
+                // India weekly value by each language's opening share. Nothing
+                // is written back to the movie.
+                const INDIA_LANG_ORDER = ['Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam'];
+                const langs = INDIA_LANG_ORDER.filter(l => openingByIndiaLanguage[l] && Number.isFinite(Number(openingByIndiaLanguage[l].openingWeekCollection)));
+                if (langs.length) {
+                    const opens = {};
+                    langs.forEach(l => { opens[l] = Number(openingByIndiaLanguage[l].openingWeekCollection || 0); });
+                    const openSum = langs.reduce((sum, l) => sum + opens[l], 0);
+                    const vals = {};
+                    if (latestWeek === 1) {
+                        langs.forEach(l => { vals[l] = opens[l]; });
+                    } else {
+                        let assigned = 0, biggest = langs[0];
+                        langs.forEach(l => {
+                            vals[l] = openSum > 0 ? Number((value * opens[l] / openSum).toFixed(2)) : 0;
+                            assigned += vals[l];
+                            if (opens[l] > opens[biggest]) biggest = l;
+                        });
+                        if (openSum > 0) vals[biggest] = Number((vals[biggest] + (value - assigned)).toFixed(2));
+                    }
+                    const langCards = langs.map(l => `<div class="rdash-stat-card"><div class="rdash-stat-label">${meta.flag || '🇮🇳'} India · ${l} · W${latestWeek}</div><div class="rdash-stat-value" style="font-size:1rem;">${formatCollectionCr(vals[l])}</div></div>`).join('');
+                    const langSum = langs.reduce((sum, l) => sum + vals[l], 0);
+                    return langCards + `<div class="rdash-stat-card" style="border:2px solid rgba(249,115,22,.55);"><div class="rdash-stat-label" style="font-weight:900;">🇮🇳 INDIA TOTAL · W${latestWeek}</div><div class="rdash-stat-value" style="font-size:1rem;font-weight:900;">${formatCollectionCr(langSum)}</div></div>`;
+                }
+            }
             return `<div class="rdash-stat-card"><div class="rdash-stat-label">${meta.flag || '🌍'} ${t} · W${latestWeek}</div><div class="rdash-stat-value" style="font-size:1rem;">${formatCollectionCr(value)}</div></div>`;
         }).join('');
         const total = latestWeek>=2
