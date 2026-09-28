@@ -3466,7 +3466,7 @@ body {
       <div class="mkt-category-title">🌍 Territory-wise Box Office Collection</div>
       <div class="wd-table-wrapper" style="max-height:none;">
         <table>
-          <thead><tr><th>Territory</th><th>Opening · W1</th><th>Week 2</th><th>Total Theatrical</th></tr></thead>
+          <thead><tr><th>Market / Language</th><th>Opening Week</th><th>Last Week (Week 7)</th><th>Total Box Office</th></tr></thead>
           <tbody id="frTerritoryBoxOfficeTableBody"></tbody>
         </table>
       </div>
@@ -11570,14 +11570,22 @@ function renderFinalTerritoryBoxOffice(movie) {
     const releasedTerritories = getReleasedTerritories(movie);
     const weeklyMarkets = ensureTheatricalWeeklyMarketState(movie) || {};
     const maxWeeks = Math.min(BOX_OFFICE_RUN_WEEKS, 7);
+    const lastWeek = maxWeeks; // Last Week = Week 7 (never Week 1)
+    const weekValue = (week, territory) => {
+        const wk = weeklyMarkets[week];
+        if (!wk || !Object.prototype.hasOwnProperty.call(wk, territory)) return null; // missing -> never faked
+        const v = Number(wk[territory]);
+        return Number.isFinite(v) ? v : null;
+    };
     const rows = releasedTerritories.map(territory => {
         const opening = Number((weeklyMarkets[1] && weeklyMarkets[1][territory]) || 0);
-        const week2 = Number((weeklyMarkets[2] && weeklyMarkets[2][territory]) || 0);
+        const last = weekValue(lastWeek, territory);
+        const week2 = Number((weeklyMarkets[2] && weeklyMarkets[2][territory]) || 0); // existing non-India column
         let total = 0;
         for (let week = 1; week <= maxWeeks; week++) {
             total += Number((weeklyMarkets[week] && weeklyMarkets[week][territory]) || 0);
         }
-        return { territory, opening, week2, total: Number(total.toFixed(2)) };
+        return { territory, opening, last, week2, total: Number(total.toFixed(2)) };
     });
 
     if (!rows.length) {
@@ -11585,17 +11593,89 @@ function renderFinalTerritoryBoxOffice(movie) {
         return;
     }
 
+    const fmtLast = v => v === null ? '—' : formatCollectionCr(v);
+    // Non-India markets keep their existing Week 2 figure (unchanged); it is
+    // tagged so it is never mistaken for the India Week 7 values.
+    const wk2Tag = ' <small style="opacity:.6;font-weight:600;">(W2)</small>';
+
+    // India language-wise display. Week 1 uses the stored Step 12C language
+    // values exactly. Week 2-7 India is stored only at country level, so it is
+    // split across the same active languages by their Week 1 share (display
+    // only, remainder reconciled so language rows always sum to the stored
+    // India value). Nothing is written back to the movie.
+    const INDIA_LANG_ORDER = ['Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam'];
+    const indiaLanguageRows = (() => {
+        if (!releasedTerritories.includes('India')) return [];
+        const src = movie.openingWeekCollectionByIndiaLanguage ||
+            (movie._step12COpeningWeek && movie._step12COpeningWeek.byIndiaLanguage) || {};
+        const langs = INDIA_LANG_ORDER.filter(l => src[l] && Number.isFinite(Number(src[l].openingWeekCollection)));
+        if (!langs.length) return [];
+        const openings = {};
+        langs.forEach(l => { openings[l] = Number(src[l].openingWeekCollection || 0); });
+        const openingSum = langs.reduce((sum, l) => sum + openings[l], 0);
+        const perLang = {};
+        langs.forEach(l => { perLang[l] = { opening: openings[l], last: null, total: 0 }; });
+        const splitWeek = week => {
+            const indiaValue = weekValue(week, 'India');
+            if (indiaValue === null) return null;
+            const out = {};
+            let assigned = 0, biggest = langs[0];
+            langs.forEach(l => {
+                out[l] = openingSum > 0 ? Number((indiaValue * openings[l] / openingSum).toFixed(2)) : 0;
+                assigned += out[l];
+                if (openings[l] > openings[biggest]) biggest = l;
+            });
+            if (openingSum > 0) out[biggest] = Number((out[biggest] + (indiaValue - assigned)).toFixed(2));
+            return out;
+        };
+        for (let week = 1; week <= maxWeeks; week++) {
+            const split = week === 1 ? openings : splitWeek(week);
+            if (!split) continue; // missing week data stays missing
+            langs.forEach(l => {
+                perLang[l].total += Number(split[l] || 0);
+                if (week === lastWeek) perLang[l].last = Number(split[l] || 0);
+            });
+        }
+        return langs.map(l => ({ language: l, opening: perLang[l].opening, last: perLang[l].last, total: Number(perLang[l].total.toFixed(2)) }));
+    })();
+
     rows.forEach(row => {
         const meta = TERRITORY_META[row.territory] || {};
+        if (row.territory === 'India' && indiaLanguageRows.length) {
+            indiaLanguageRows.forEach(lr => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+            <td>${meta.flag || '🌍'} India · ${escapeHtml(lr.language)}</td>
+            <td>${formatCollectionCr(lr.opening)}</td>
+            <td>${fmtLast(lr.last)}</td>
+            <td><strong>${formatCollectionCr(lr.total)}</strong></td>`;
+                tbody.appendChild(tr);
+            });
+            // INDIA TOTAL is strictly the sum of the active language rows above.
+            const iOpen = indiaLanguageRows.reduce((sum, r) => sum + r.opening, 0);
+            const iLastRows = indiaLanguageRows.filter(r => r.last !== null);
+            const iLast = iLastRows.length === indiaLanguageRows.length ? iLastRows.reduce((sum, r) => sum + r.last, 0) : null;
+            const iTotal = indiaLanguageRows.reduce((sum, r) => sum + r.total, 0);
+            const itr = document.createElement('tr');
+            itr.style.cssText = 'background:rgba(249,115,22,.14);border-top:2px solid rgba(249,115,22,.55);border-bottom:2px solid rgba(249,115,22,.55);';
+            itr.innerHTML = `
+            <td style="font-weight:900;">🇮🇳 INDIA TOTAL</td>
+            <td style="font-weight:900;">${formatCollectionCr(iOpen)}</td>
+            <td style="font-weight:900;">${fmtLast(iLast)}</td>
+            <td style="font-weight:900;">${formatCollectionCr(iTotal)}</td>`;
+            tbody.appendChild(itr);
+            return;
+        }
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td>${meta.flag || '🌍'} ${escapeHtml(row.territory)}</td>
             <td>${formatCollectionCr(row.opening)}</td>
-            <td>${formatCollectionCr(row.week2)}</td>
+            <td>${formatCollectionCr(row.week2)}${wk2Tag}</td>
             <td><strong>${formatCollectionCr(row.total)}</strong></td>`;
         tbody.appendChild(tr);
     });
 
+    // Worldwide totals stay derived from the existing per-territory values.
     const openingTotal = Number(rows.reduce((sum, row) => sum + row.opening, 0).toFixed(2));
     const week2Total = Number(rows.reduce((sum, row) => sum + row.week2, 0).toFixed(2));
     const lifetimeTerritoryTotal = Number(rows.reduce((sum, row) => sum + row.total, 0).toFixed(2));
@@ -11603,7 +11683,7 @@ function renderFinalTerritoryBoxOffice(movie) {
     totalRow.innerHTML = `
         <td><strong>🌍 Worldwide Total</strong></td>
         <td><strong>${formatCollectionCr(openingTotal)}</strong></td>
-        <td><strong>${formatCollectionCr(week2Total)}</strong></td>
+        <td><strong>${formatCollectionCr(week2Total)}</strong>${wk2Tag}</td>
         <td><strong>${formatCollectionCr(lifetimeTerritoryTotal)}</strong></td>`;
     tbody.appendChild(totalRow);
 }
