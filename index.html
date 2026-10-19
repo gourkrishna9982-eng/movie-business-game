@@ -13976,7 +13976,7 @@ function finalizeMovieRun(m, options = {}) {
         let castSalaries = 0;
         ['hero','heroine','villain','supporting','cameo'].forEach(role => {
             (m.cast && m.cast[role] || []).forEach(t => {
-                castSalaries += parseSalaryToNumber(t.salary);
+                castSalaries += safeNum(t.signedFee || parseSalaryToNumber(t.salary));
             });
         });
 
