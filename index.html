@@ -15162,13 +15162,16 @@ function ensureGenreCombinationRating(movie){
             return null;
         }
 
-        const X = (storyRating * 10) * 3
-            + (genreRating * 10)
-            + Number(vfxRating)
-            + Number(writerRating)
-            + Number(directorRating)
-            + Number(movieRating);
-        const critics = Number((X / 90).toFixed(4));
+        // AUTHORITATIVE CR FORMULA (Formula 1):
+        // CR = (3*S + G + M/4 + 15*V/100 + W/10 + D/10) / 10
+        // S,G on 0-10; V,W,D,M on 0-100. M here = Movie Rating (not Collection Multiplier).
+        const X = 3 * storyRating
+            + genreRating
+            + Number(movieRating) / 4
+            + 15 * Number(vfxRating) / 100
+            + Number(writerRating) / 10
+            + Number(directorRating) / 10;
+        const critics = Number((X / 10).toFixed(4));
 
         movie.movieRatingScore = movieRating; // Separate from the existing U/UA/A content-rating field.
         movie.movieRatingScale = '0-100';
@@ -15295,8 +15298,8 @@ function ensureGenreCombinationRating(movie){
         const Y = testWriter.story + testWriter.screenplay + testWriter.dialogue + testWriter.creativity + testWriter.speed;
         const Z = testDirector.direction + testDirector.vision + testDirector.leadership + testDirector.creativity + testDirector.speed;
         const movieRating = (Y + Z) / 10;
-        const X = (8.0 * 10) * 3 + (7.5 * 10) + 88 + 70 + 80 + 85;
-        const criticsRating = X / 90;
+        const X = 3 * 8.0 + 7.5 + 85 / 4 + 15 * 88 / 100 + 70 / 10 + 80 / 10;
+        const criticsRating = X / 10;
         window.STEP_9_VALIDATION = {
             Y, Z, movieRating,
             criticsX: X,
@@ -15498,7 +15501,7 @@ function ensureGenreCombinationRating(movie){
         // Acting Rating is completely independent from the regional ratings.
         const actingRating = finiteNumber(calculateActingRating(movie));
 
-        if(storyRating == null || vfxRating == null || movieRating == null ||
+        if(storyRating == null || movieRating == null ||
            actorRating == null || villainRating == null || actingRating == null){
             movie.audienceRating = null;
             movie.audienceRatingScale = '0-10';
@@ -15507,13 +15510,15 @@ function ensureGenreCombinationRating(movie){
         }
 
         // AUTHORITATIVE STEP 10 FORMULA — exactly six inputs, no modifiers.
-        const X = (storyRating * 10) * 3
-            + vfxRating
-            + movieRating
-            + actorRating
-            + villainRating
-            + actingRating;
-        const audienceRating = Number((X / 80).toFixed(6));
+        // AUTHORITATIVE AR FORMULA (Formula 2):
+        // AR = (2.5*S + A/5 + 15*V/100 + T/4 + 15*M/100) / 10
+        // S 0-10; A = Actor Rating, T = Villain Rating, V = ACTING Rating (not VFX), M = Movie Rating; all 0-100.
+        const X = 2.5 * storyRating
+            + actorRating / 5
+            + 15 * actingRating / 100
+            + villainRating / 4
+            + 15 * movieRating / 100;
+        const audienceRating = Number((X / 10).toFixed(6));
 
         movie.actingRating = actingRating;
         movie.actingRatingScale = '0-100';
@@ -15523,7 +15528,6 @@ function ensureGenreCombinationRating(movie){
         movie.audienceRatingVersion = STEP_10_VERSION;
         movie.audienceRatingBreakdown = {
             storyRating: storyRating,
-            vfxRating: vfxRating,
             movieRating: movieRating,
             actorRating: actorRating,
             villainRating: villainRating,
@@ -15558,7 +15562,7 @@ function ensureGenreCombinationRating(movie){
         const b = m.audienceRatingBreakdown || {};
         const available = Number.isFinite(Number(m.audienceRating)) && Number.isFinite(Number(b.actingRating)) && m.audienceRatingVersion === STEP_10_VERSION;
         if(!available){
-            audienceHost.innerHTML = `<div style="padding:12px;color:#64748b;border-top:1px solid rgba(148,163,184,.18);">Audience Rating is not available until Story, VFX, Movie, Male Actor, Villain and Acting inputs are complete.</div>`;
+            audienceHost.innerHTML = `<div style="padding:12px;color:#64748b;border-top:1px solid rgba(148,163,184,.18);">Audience Rating is not available until Story, Movie, Male Actor, Villain and Acting inputs are complete.</div>`;
             return;
         }
 
@@ -15569,7 +15573,7 @@ function ensureGenreCombinationRating(movie){
             <div class="rdash-stat-card"><div class="rdash-stat-label">Audience Rating</div><div class="rdash-stat-value">${Number(m.audienceRating).toFixed(2)}/10</div></div>
           </div>
           <div style="margin-top:12px;padding:12px 14px;border-radius:12px;background:#f8fafc;border:1px solid rgba(148,163,184,.18);font-size:.84rem;color:#475569;line-height:1.65;">
-            Story Rating: ${Number(b.storyRating).toFixed(1)}/10 · VFX Rating: ${Number(b.vfxRating).toFixed(2)}/100 · Movie Rating: ${Number(b.movieRating).toFixed(2)}/100<br>
+            Story Rating: ${Number(b.storyRating).toFixed(1)}/10 · Movie Rating: ${Number(b.movieRating).toFixed(2)}/100<br>
             Actor Rating: ${Number(b.actorRating).toFixed(2)}/100 · Villain Rating: ${Number(b.villainRating).toFixed(2)}/100 · Acting Rating: ${Number(b.actingRating).toFixed(2)}/100
           </div>
         </div>`;
@@ -15652,8 +15656,8 @@ function ensureGenreCombinationRating(movie){
             testVillain.genreRatings.Drama, testVillain.genreRatings.Comedy, testVillain.genreRatings.Family
         ];
         const actingTest = actingValues.reduce((a,b)=>a+b,0) / actingValues.length;
-        const audienceX = (8.0 * 10) * 3 + 88 + 85 + 80 + 72.5 + 82.67;
-        const audienceTest = audienceX / 80;
+        const audienceX = 2.5 * 8.0 + 80 / 5 + 15 * 82.67 / 100 + 72.5 / 4 + 15 * 85 / 100;
+        const audienceTest = audienceX / 10;
         const missingActor = {id:3, name:'Missing Actor', genreRatings:{Action:90}};
         const missingVillain = {id:4, name:'Partial Villain', genreRatings:{Action:80, Thriller:70}};
         const missingMovie = {genres:['Action','Thriller'], cast:{hero:[missingActor], villain:[missingVillain]}};
@@ -15667,7 +15671,7 @@ function ensureGenreCombinationRating(movie){
             regionalSeparation: {actorRating:80, villainRating:72.5, usedForActing:false},
             missingGenreValidCount: missingUsed.length,
             missingGenreExpectedCount: 3,
-            deterministic: audienceTest === ((8.0 * 10) * 3 + 88 + 85 + 80 + 72.5 + 82.67) / 80,
+            deterministic: audienceTest === (2.5 * 8.0 + 80 / 5 + 15 * 82.67 / 100 + 72.5 / 4 + 15 * 85 / 100) / 10,
             genreOrderIndependent: actingTest === ([
                 testActor.genreRatings.Family, testActor.genreRatings.Drama, testActor.genreRatings.Comedy,
                 testVillain.genreRatings.Family, testVillain.genreRatings.Drama, testVillain.genreRatings.Comedy
@@ -16304,7 +16308,7 @@ function ensureGenreCombinationRating(movie){
             if(n && idx!=null && idx>=0 && Number.isFinite(Number(n.p[idx]))) vals.push(Number(n.p[idx]));
         });
         if(!vals.length) return 0;
-        return Number((vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(4));
+        return Number(vals.reduce((a,b)=>a+b,0).toFixed(4));
     }
     function calculateStep12CTrailerTypeHype(movie){
         const n=step12CLookup(movie);
@@ -16323,7 +16327,43 @@ function ensureGenreCombinationRating(movie){
         const mini=calculateStep12CMiniHypeSum(m);
         if(mini==null) return null;
         const promotion=calculateStep12CPromotionRating(m);
-        return Number(((trailer+mini)/8+promotion).toFixed(6));
+        // Formula 6: H = (Trailer Hype + Mini Hype + Promotions) / 12
+        return Number(((trailer+mini+promotion)/12).toFixed(6));
+    }
+
+    // Formula 5: Y = Sum of valid unique selected actors' role ratings / N (0-100 scale).
+    // Role mapping: hero/heroine (lead) -> leadRating, villain -> villainRating,
+    // supporting -> supportingRating, cameo -> cameoRating. Empty slots and duplicate
+    // actors are skipped; numerator and denominator use the same set of people.
+    // If an actor record has no role-specific field, the existing regional rating is used.
+    function calculateStep12CActorRoleRating(movie){
+        if(!movie || !movie.cast || typeof calculateCastRegionalRating!=='function') return null;
+        const roleField={hero:'leadRating',heroine:'leadRating',villain:'villainRating',supporting:'supportingRating',cameo:'cameoRating'};
+        const seen=new Set();
+        let sum=0, count=0;
+        ['hero','villain','heroine','supporting','cameo'].forEach(role=>{
+            const list=Array.isArray(movie.cast[role]) ? movie.cast[role] : [];
+            list.filter(Boolean).forEach(talent=>{
+                const key=[talent.id,String(talent.gender||'').toLowerCase(),String(talent.name||'').trim().toLowerCase()].join('|');
+                if(seen.has(key)) return;
+                seen.add(key);
+                let rating=(talent[roleField[role]]!=null && talent[roleField[role]]!=='') ? finiteStep12C(talent[roleField[role]]) : null;
+                if(rating==null) rating=finiteStep12C(calculateCastRegionalRating(movie,talent));
+                if(rating==null) return;
+                sum+=rating; count++;
+            });
+        });
+        return count ? sum/count : null;
+    }
+    // Formula 7: DI = 0.35*H + 0.40*WOM + 0.25*Y   (all on 0-100)
+    function calculateStep12CDemandIndex(H, WOM, Y){
+        if(H==null || WOM==null || Y==null) return null;
+        return (0.35*H) + (0.40*WOM) + (0.25*Y);
+    }
+    // Formula 8: Collection Multiplier = 0.5 + 2.5*(DI/100)^2
+    function calculateStep12CCollectionMultiplier(DI){
+        if(DI==null) return null;
+        return 0.5 + 2.5*Math.pow(DI/100,2);
     }
 
     function step12CGenreTrendAboveThreshold(movie){
@@ -16332,7 +16372,7 @@ function ensureGenreCombinationRating(movie){
             ? gameState.genreData : (typeof defaultGenreTrends!=='undefined' ? defaultGenreTrends : []);
         return genres.some(g=>{
             const match=trends.find(t=>String(t.name||'').trim().toLowerCase()===String(g||'').trim().toLowerCase());
-            return match && Number(match.multiplier)>1.3;
+            return match && Number(match.multiplier)>1.0;
         });
     }
     function step12CFestivalQualifies(movie){
@@ -16474,24 +16514,14 @@ function ensureGenreCombinationRating(movie){
         const fan=Number(fanFollowing);
         if(!Number.isFinite(capacity) || !Number.isFinite(fan)) return null;
 
-        // India always uses the permanent/original Z formula.
-        if(isIndia){
-            return capacity*(fan/100);
-        }
-
-        // Non-India markets use the reduced two-stage formula at 80% or below.
-        if(fan<=80){
-            const M=capacity*(fan/100);
-            return M*(fan/200);
-        }
-
-        // Non-India markets above 80% use the original Z formula.
+        // Formula 4: Z = Watching Capacity * (Fan Following / 100), for every market.
+        // Fan Following is applied exactly once (the old non-India two-stage reduction is removed).
         return capacity*(fan/100);
     }
 
     function calculateStep12COpeningWeek(movie){
         const m=movie;
-        if(!m) return {total:0,byCountry:{},byIndiaLanguage:{},Y:null,totalHype:null,WOM:null,festival:false,genreTrend:false};
+        if(!m) return {total:0,byCountry:{},byIndiaLanguage:{},Y:null,DI:null,collectionMultiplier:null,totalHype:null,WOM:null,festival:false,genreTrend:false};
         // Step 12C consumes the current authoritative Step 9/10/11 state.
         // No separate WOM calculation is performed here.
         if (typeof window.syncCurrentMovieRatingState === 'function') {
@@ -16503,7 +16533,10 @@ function ensureGenreCombinationRating(movie){
         const wom=(typeof window.calculateWOMRating==='function')
             ? finiteStep12C(window.calculateWOMRating(m))
             : finiteStep12C(m.wordOfMouthScore);
-        const Y=(totalHype!=null && wom!=null) ? Number(((totalHype+wom)/300+1)) : null;
+        // Formulas 5,7,8: Y (actor role rating 0-100) -> DI -> Collection Multiplier.
+        const Y=calculateStep12CActorRoleRating(m);
+        const DI=calculateStep12CDemandIndex(totalHype,wom,Y);
+        const collectionMultiplier=calculateStep12CCollectionMultiplier(DI);
         const festival=step12CFestivalQualifies(m);
         const genreTrend=step12CGenreTrendAboveThreshold(m);
         const modifier=(festival?1.15:1)*(genreTrend?1.15:1);
@@ -16527,18 +16560,19 @@ function ensureGenreCombinationRating(movie){
             const peoplePerShow=150;
             const watchingCapacity=step12CWatchingCapacity(screens,showsPerDay,peoplePerShow);
             const Z=(fanFollowing!=null) ? calculateStep12CZ(watchingCapacity,fanFollowing,true) : null;
-            const baseCollection=(Z!=null && ticketPrice!=null && Y!=null) ? Z*ticketPrice*Y : 0;
-            const realCollection=baseCollection*modifier;
+            // Formula 10 (rupees) and Formula 11.
+            const baseCollection=(Z!=null && ticketPrice!=null) ? Z*ticketPrice : 0;
+            const realCollection=(collectionMultiplier!=null) ? baseCollection*collectionMultiplier*modifier : 0;
             byIndiaLanguage[language]={
                 country:'India',language,screens,showsPerDay,peoplePerShow,seatsPerShow:peoplePerShow,watchingCapacity,
                 fanFollowing,fanFollowingFraction:fanFollowing==null?null:fanFollowing/100,
-                effectiveWatchingVolume:Z,ticketPrice,Y,baseOpeningWeekCollection:baseCollection,
+                effectiveWatchingVolume:Z,ticketPrice,Y,demandIndex:DI,collectionMultiplier,baseOpeningWeekCollection:baseCollection,
                 festivalMultiplier:festival?1.15:1,genreTrendMultiplier:genreTrend?1.15:1,
                 openingWeekCollection:realCollection
             };
         });
 
-        // NON-INDIA: existing country calculation remains unchanged.
+        // NON-INDIA: country-wise screens, shows, people, fan following and ticket price are unchanged.
         activeCountries.forEach(country=>{
             const screens=step12CScreenCount(m,country);
             const config=step12CWatchingCapacityConfig(country);
@@ -16548,16 +16582,14 @@ function ensureGenreCombinationRating(movie){
             const peoplePerShow=config ? Number(config.people) : 0;
             const watchingCapacity=step12CWatchingCapacity(screens,showsPerDay,peoplePerShow);
             const Z=(fanFollowing!=null) ? calculateStep12CZ(watchingCapacity,fanFollowing,false) : null;
-            // NON-INDIA: deliberately keep Y, Festival, and Genre Trend out of
-            // the collection calculation. Y remains a movie-level value for the
-            // existing Step 12C state/output, but is NOT applied to this market.
+            // Formulas 10 + 11 apply to every selected market (India languages and countries).
             const baseCollection=(Z!=null && ticketPrice!=null) ? Z*ticketPrice : 0;
-            const realCollection=baseCollection;
+            const realCollection=(collectionMultiplier!=null) ? baseCollection*collectionMultiplier*modifier : 0;
             byCountry[country]={
                 country,screens,showsPerDay,peoplePerShow,seatsPerShow:peoplePerShow,watchingCapacity,
                 fanFollowing,fanFollowingFraction:fanFollowing==null?null:fanFollowing/100,
-                effectiveWatchingVolume:Z,ticketPrice,Y,baseOpeningWeekCollection:baseCollection,
-                festivalMultiplier:1,genreTrendMultiplier:1,
+                effectiveWatchingVolume:Z,ticketPrice,Y,demandIndex:DI,collectionMultiplier,baseOpeningWeekCollection:baseCollection,
+                festivalMultiplier:festival?1.15:1,genreTrendMultiplier:genreTrend?1.15:1,
                 openingWeekCollection:realCollection
             };
         });
@@ -16575,7 +16607,10 @@ function ensureGenreCombinationRating(movie){
         m.fanFollowingByIndiaLanguage=indiaFanFollowing;
         m.indiaLanguageScreenCounts={...STEP12C_INDIA_LANGUAGES};
         m.indiaLanguageTotalScreens=Object.values(STEP12C_INDIA_LANGUAGES).reduce((a,b)=>a+b,0);
-        m.openingWeekMultiplierY=Y;
+        m.actorRoleRatingY=Y;
+        m.demandIndex=DI;
+        m.collectionMultiplier=collectionMultiplier;
+        m.openingWeekMultiplierY=collectionMultiplier;
         m.openingWeekCollectionByCountry=byCountry;
         m.openingWeekCollectionByIndiaLanguage=byIndiaLanguage;
         m.indiaTotalOpeningWeekCollection=indiaTotal;
@@ -16584,7 +16619,7 @@ function ensureGenreCombinationRating(movie){
         m.openingWeekFestivalModifier=festival?1.15:1;
         m.openingWeekGenreTrendModifier=genreTrend?1.15:1;
         m.openingWeekCollectionVersion=STEP_12C_VERSION;
-        return {total,byCountry,byIndiaLanguage,Y,totalHype,wom,festival,genreTrend,modifier,indiaTotal,indiaFanFollowing};
+        return {total,byCountry,byIndiaLanguage,Y,DI,collectionMultiplier,totalHype,wom,festival,genreTrend,modifier,indiaTotal,indiaFanFollowing};
     }
 
     function ensureStep12COpeningWeek(movie){ return calculateStep12COpeningWeek(movie); }
@@ -16604,7 +16639,7 @@ function ensureGenreCombinationRating(movie){
         const mini=calculateStep12CMiniHypeSum(m);
         const promo=calculateStep12CPromotionRating(m);
         const trailer=calculateStep12CTrailerTypeHype(m);
-        const total=mini==null ? null : Number(((trailer+mini)/8+promo).toFixed(6));
+        const total=mini==null ? null : Number(((trailer+mini+promo)/12).toFixed(6));
         m.promotionRating=promo; m.trailerTypeHype=trailer; m.miniHypeSum=mini; m.totalHype=total;
         const selectedPromos=Object.keys(m.marketingSelections||{}).length;
         host.innerHTML=`<div class="mkt-category-title">🔥 HYPE SYSTEM · ${
@@ -16626,12 +16661,12 @@ function ensureGenreCombinationRating(movie){
           <div style="padding:12px;border:1px solid rgba(148,163,184,.18);border-radius:10px;background:#f8fafc;">
             <div style="font-size:.72rem;color:#64748b;text-transform:uppercase;font-weight:700;">Promotion Rating</div>
             <div style="margin-top:7px;font-size:1.25rem;font-weight:800;">${promo.toFixed(2)}%</div>
-            <div style="margin-top:4px;font-size:.76rem;color:#64748b;">${selectedPromos} selected promotion(s), equal-weight average.</div>
+            <div style="margin-top:4px;font-size:.76rem;color:#64748b;">${selectedPromos} selected promotion(s), sum of selected promotion values.</div>
           </div>
           <div style="padding:12px;border:1px solid rgba(37,99,235,.18);border-radius:10px;background:#eff6ff;">
             <div style="font-size:.72rem;color:#1d4ed8;text-transform:uppercase;font-weight:700;">Total Hype</div>
             <div style="margin-top:7px;font-size:1.25rem;font-weight:800;color:#1d4ed8;">${total==null?'Not Available':total.toFixed(3)}</div>
-            <div style="margin-top:4px;font-size:.76rem;color:#475569;">Exact formula: ((Trailer Hype + Mini Hype Sum) / 8) + Promotion Rating.</div>
+            <div style="margin-top:4px;font-size:.76rem;color:#475569;">Exact formula: (Trailer Hype + Mini Hype Sum + Promotion Sum) / 12.</div>
           </div>
         </div>`;
     }
@@ -16690,7 +16725,9 @@ function ensureGenreCombinationRating(movie){
           <div class="rdash-stats-grid">
             <div class="rdash-stat-card"><div class="rdash-stat-label">Total Hype</div><div class="rdash-stat-value">${result.totalHype==null?'—':result.totalHype.toFixed(3)}</div></div>
             <div class="rdash-stat-card"><div class="rdash-stat-label">WOM Rating</div><div class="rdash-stat-value">${result.wom==null?'—':result.wom.toFixed(2)}/100</div></div>
-            <div class="rdash-stat-card"><div class="rdash-stat-label">Y</div><div class="rdash-stat-value">${result.Y==null?'—':result.Y.toFixed(6)}</div></div>
+            <div class="rdash-stat-card"><div class="rdash-stat-label">Actor Role Rating (Y)</div><div class="rdash-stat-value">${result.Y==null?'—':result.Y.toFixed(2)}</div></div>
+            <div class="rdash-stat-card"><div class="rdash-stat-label">Demand Index</div><div class="rdash-stat-value">${result.DI==null?'—':result.DI.toFixed(2)}</div></div>
+            <div class="rdash-stat-card"><div class="rdash-stat-label">Collection Multiplier</div><div class="rdash-stat-value">${result.collectionMultiplier==null?'—':result.collectionMultiplier.toFixed(4)}</div></div>
             <div class="rdash-stat-card"><div class="rdash-stat-label">Opening Week Collection</div><div class="rdash-stat-value" style="font-size:1.35rem;">${formatCollectionCr(result.total)}</div></div>
           </div>
           <div style="margin-top:10px;color:#475569;font-size:.82rem;">Festival ×${result.festival?'1.15':'1.00'} · Genre Trend ×${result.genreTrend?'1.15':'1.00'} · India is split into independent language markets; only applicable + selected markets are included.</div>
@@ -16708,6 +16745,9 @@ function ensureGenreCombinationRating(movie){
     window.calculateTrailerTypeHype=calculateStep12CTrailerTypeHype;
     window.calculateMiniHypeSum=calculateStep12CMiniHypeSum;
     window.calculateTotalHype=calculateStep12CTotalHype;
+    window.calculateActorRoleRating=calculateStep12CActorRoleRating;
+    window.calculateDemandIndex=calculateStep12CDemandIndex;
+    window.calculateCollectionMultiplier=calculateStep12CCollectionMultiplier;
     window.calculateOpeningWeekCollection=calculateStep12COpeningWeek;
     window.ensureStep12COpeningWeek=ensureStep12COpeningWeek;
     window.renderStep12CHypeControls=renderStep12CHypeControls;
@@ -16807,28 +16847,31 @@ function ensureGenreCombinationRating(movie){
 
     // Deterministic Step 12C formula validation.
     try{
-        const test={screens:5200,wom:60.5,hype:141.9,ticket:300,fan:80.5};
+        const test={screens:5200,wom:60.5,hype:60,roleY:70,ticket:300,fan:80.5};
         const capacity=test.screens*4*150;
         const z=capacity*test.fan/100;
-        const y=(test.hype+test.wom)/300+1;
-        const base=z*test.ticket*y;
-        const real=base*1.15*1.15;
+        const DI=0.35*test.hype+0.40*test.wom+0.25*test.roleY;
+        const y=0.5+2.5*Math.pow(DI/100,2);
+        const base=z*test.ticket;
+        const real=base*y*1.15*1.15;
         window.STEP_12C_VALIDATION={
             datasetCount:Object.keys(STEP_12C_HYPE_DATA.data).length,
             promotionFormula:'Sum of selected promotion effectiveness percentages / number of selected promotions',
             trailerFormula:'Direct genre-combination Trailer Type percentage',
             miniHypeFormula:'Sum of six genre-specific Mini Hype values',
-            totalHypeFormula:'((Trailer Type Hype + Mini Hype Sum) / 8) + Promotion Rating',
-            YFormula:'(Total Hype + WOM) / 300 + 1',
+            totalHypeFormula:'(Trailer Hype + Mini Hype + Promotions) / 12',
+            YFormula:'Actor Role Rating Sum / Total Persons (0-100)',
+            DIFormula:'0.35*H + 0.40*WOM + 0.25*Y',
+            collectionMultiplierFormula:'0.5 + 2.5*(DI/100)^2',
             watchingCapacityFormula:'Screens * Shows * People (country-specific); India language markets use 4 × 150',
             ZFormula:'Watching Capacity * Fan Following / 100',
-            indiaOpeningWeekFormula:'Z * India Ticket Price * Y * Festival Multiplier * Genre Trend Multiplier',
-            nonIndiaOpeningWeekFormula:'Z * Country Ticket Price',
+            indiaOpeningWeekFormula:'Z * India Ticket Price * Collection Multiplier * Festival Bonus * Genre Bonus',
+            nonIndiaOpeningWeekFormula:'Z * Country Ticket Price * Collection Multiplier * Festival Bonus * Genre Bonus',
             indiaFestivalModifier:1.15,
             indiaGenreTrendModifier:1.15,
-            nonIndiaYApplied:false,
-            nonIndiaFestivalApplied:false,
-            nonIndiaGenreTrendApplied:false,
+            nonIndiaCollectionMultiplierApplied:true,
+            nonIndiaFestivalApplied:true,
+            nonIndiaGenreTrendApplied:true,
             countryWise:true,
             indiaLanguageWise:true,
             indiaLanguageScreens:{...STEP12C_INDIA_LANGUAGES},
@@ -16844,7 +16887,7 @@ function ensureGenreCombinationRating(movie){
             noWeek2To10EngineAdded:true,
             noRandomness:true,
             illustrativeTest:{capacity,z,y,base,real,baseCr:base/1e7,realCr:real/1e7},
-            allPassed:capacity===3120000 && z===2511600 && Math.abs(y-1.6746666666666667)<1e-12 && Math.abs(base/1e7-126.182784)<1e-9 && Math.abs(real/1e7-166.87673184)<1e-8 && !!(window.STEP12C_WATCHING_CAPACITY_VALIDATION && window.STEP12C_WATCHING_CAPACITY_VALIDATION.allPassed)
+            allPassed:capacity===3120000 && z===2511600 && Math.abs(DI-62.7)<1e-9 && Math.abs(y-(0.5+2.5*Math.pow(0.627,2)))<1e-12 && Math.abs(base/1e7-75.348)<1e-9 && Math.abs(real-(base*y*1.15*1.15))<1e-3 && !!(window.STEP12C_WATCHING_CAPACITY_VALIDATION && window.STEP12C_WATCHING_CAPACITY_VALIDATION.allPassed)
         };
     }catch(e){window.STEP_12C_VALIDATION={error:String(e&&e.message||e)};}
 })();
@@ -17075,12 +17118,12 @@ function ensureGenreCombinationRating(movie){
             rerenderUsesAuthoritativeMovieState: /m\.trailerType/.test(renderSource),
             releaseValidationStillChecksTrailerType: /!m\.trailerType/.test(String(confirmReleasePlanning)),
             existingTrailerHypeCalculationUsed: /calculateStep12CTrailerTypeHype/.test(renderSource),
-            totalHypeFormulaPreserved: /trailer\+mini/.test(String(window.calculateTotalHype||'')) && /\/8/.test(String(window.calculateTotalHype||'')) && /promotion/.test(String(window.calculateTotalHype||'')),
+            totalHypeFormulaPreserved: /trailer\+mini/.test(String(window.calculateTotalHype||'')) && /\/12/.test(String(window.calculateTotalHype||'')) && /promotion/.test(String(window.calculateTotalHype||'')),
             openingWeekRemainsStep12C: typeof window.calculateOpeningWeekCollection==='function' && window.calculateOpeningWeekCollection===window.calculateOpeningWeekendCollection,
             indiaLanguageScreensPreserved: !!window.STEP12C_INDIA_LANGUAGE_SCREENS && window.STEP12C_INDIA_LANGUAGE_SCREENS.Hindi===6200 && window.STEP12C_INDIA_LANGUAGE_SCREENS.Telugu===5000 && window.STEP12C_INDIA_LANGUAGE_SCREENS.Tamil===4000 && window.STEP12C_INDIA_LANGUAGE_SCREENS.Kannada===3000 && window.STEP12C_INDIA_LANGUAGE_SCREENS.Malayalam===2000,
             noTrailerAssignmentDuringRender: !/m\.trailerType\s*=\s*name/.test(renderSource),
             noReleaseOrOpeningCallForPreReleaseSelection: !/ensureStep12COpeningWeek\(m\)/.test(selectorSource.split('if(m.released)')[0]),
-            allPassed: exactTrailerSet && !!releaseHost && /renderStep12CHypeControls\(m,\s*['"]step12CHypeControlsReleasePlanning['"]\)/.test(String(renderReleasePlanningPage)) && /STEP_12C_HYPE_DATA\.trailers\.map/.test(renderSource) && /m\.trailerType=allowed\.includes\(value\)\?value:''/.test(selectorSource) && /!m\.trailerType/.test(String(confirmReleasePlanning)) && /calculateStep12CTrailerTypeHype/.test(renderSource) && /m\.trailerType===name/.test(renderSource) && /trailer\+mini/.test(String(window.calculateTotalHype||'')) && /\/8/.test(String(window.calculateTotalHype||'')) && /promotion/.test(String(window.calculateTotalHype||''))
+            allPassed: exactTrailerSet && !!releaseHost && /renderStep12CHypeControls\(m,\s*['"]step12CHypeControlsReleasePlanning['"]\)/.test(String(renderReleasePlanningPage)) && /STEP_12C_HYPE_DATA\.trailers\.map/.test(renderSource) && /m\.trailerType=allowed\.includes\(value\)\?value:''/.test(selectorSource) && /!m\.trailerType/.test(String(confirmReleasePlanning)) && /calculateStep12CTrailerTypeHype/.test(renderSource) && /m\.trailerType===name/.test(renderSource) && /trailer\+mini/.test(String(window.calculateTotalHype||'')) && /\/12/.test(String(window.calculateTotalHype||'')) && /promotion/.test(String(window.calculateTotalHype||''))
         };
     } catch(e) {
         window.FINAL_TRAILER_UI_VALIDATION = {error:String(e&&e.message||e), allPassed:false};
