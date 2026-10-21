@@ -1434,6 +1434,20 @@ body {
                     </div>
                 </div>
 
+                <!-- INDUSTRY RANKINGS (additive) -->
+                <div class="dashboard-grid" style="margin-top: 18px;">
+                    <div class="dash-card" data-view="industryrankings" onclick="switchStudioSubView('industryrankings'); renderIndustryRankingsView();">
+                        <div class="dash-card-left">
+                            <div class="dash-icon">👑</div>
+                            <div class="dash-info">
+                                <h3>Industry Rankings</h3>
+                                <p>Opening, Lifetime, WOM, Hit Machine & market kings</p>
+                            </div>
+                        </div>
+                        <span>➔</span>
+                    </div>
+                </div>
+
                 <!-- FOURTH ROW -->
                 <div class="dashboard-grid" style="margin-top: 18px;">
                     <div class="dash-card" data-view="searchmovies" onclick="switchStudioSubView('searchmovies')">
@@ -1647,6 +1661,17 @@ body {
                     Temporarily remove a completed movie from Industry Competition rankings, or add it back. This never deletes the movie or changes its history, collections, ratings or awards.
                 </p>
                 <div class="movies-list" id="compManageMovies"></div>
+            </section>
+
+            <!-- SUB-PANEL: INDUSTRY RANKINGS (additive) -->
+            <section id="studio-sub-industryrankings" class="studio-sub-panel">
+                <div class="view-nav-header">
+                    <div class="view-title-group">
+                        <button class="header-btn" onclick="switchStudioSubView('dashboard')">➔ Back</button>
+                        <h2>👑 Industry Rankings</h2>
+                    </div>
+                </div>
+                <div id="industryRankingsContainer"></div>
             </section>
 
             <!-- SUB-PANEL: SEARCH MOVIES -->
@@ -13954,6 +13979,54 @@ function finalizeMovieRun(m, options = {}) {
             }
         }
 
+        // Language-wise lifetime totals use the same India-weekly allocation
+        // rule already used by the live territory card: each released language
+        // receives its stored opening-week share of that week's India market.
+        // Persist only when the underlying per-language opening rows and weekly
+        // India market history are available; never substitute India finalGross.
+        const lifetimeLangSource = m.openingWeekCollectionByIndiaLanguage ||
+            (m._step12COpeningWeek && m._step12COpeningWeek.byIndiaLanguage) || null;
+        if (lifetimeLangSource && typeof lifetimeLangSource === 'object' &&
+            Array.isArray(m.weeklyCollections) && m.weeklyCollections.length) {
+            const langOrder = ['Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam'];
+            const langOpens = {};
+            langOrder.forEach(lang => {
+                const row = lifetimeLangSource[lang];
+                const opening = Number(row && row.openingWeekCollection);
+                if (row && Number.isFinite(opening) && opening >= 0) langOpens[lang] = opening;
+            });
+            const langs = Object.keys(langOpens);
+            const openSum = langs.reduce((sum, lang) => sum + langOpens[lang], 0);
+            const marketState = ensureTheatricalWeeklyMarketState(m) || {};
+            const maxWeeksForLang = Math.min(BOX_OFFICE_RUN_WEEKS, m.weeklyCollections.length);
+            const languageLifetime = {};
+            let completeLanguageHistory = langs.length > 0 && openSum > 0;
+            langs.forEach(lang => { languageLifetime[lang] = 0; });
+            for (let week = 1; week <= maxWeeksForLang && completeLanguageHistory; week++) {
+                const indiaWeek = Number(marketState[week] && marketState[week].India);
+                if (!Number.isFinite(indiaWeek) || indiaWeek < 0) {
+                    completeLanguageHistory = false;
+                    break;
+                }
+                let assigned = 0, biggest = langs[0];
+                const values = {};
+                langs.forEach(lang => {
+                    values[lang] = Number((indiaWeek * langOpens[lang] / openSum).toFixed(2));
+                    assigned += values[lang];
+                    if (langOpens[lang] > langOpens[biggest]) biggest = lang;
+                });
+                values[biggest] = Number((values[biggest] + indiaWeek - assigned).toFixed(2));
+                langs.forEach(lang => { languageLifetime[lang] += values[lang]; });
+            }
+            if (completeLanguageHistory) {
+                m.lifetimeCollectionByIndiaLanguage = {};
+                langs.forEach(lang => {
+                    m.lifetimeCollectionByIndiaLanguage[lang] = Number(languageLifetime[lang].toFixed(2));
+                });
+                m.lifetimeCollectionByIndiaLanguageVersion = 1;
+            }
+        }
+
         // Lifetime is the sum of the authoritative weekly worldwide values.
         // Territory tracking is only a breakdown and is verified, never used
         // to manufacture or replace worldwide revenue.
@@ -17220,6 +17293,256 @@ function ensureGenreCombinationRating(movie){
 </script>
 
 
+
+<script>
+/* ==========================================================================
+   INDUSTRY RANKINGS (additive, read-only)
+   --------------------------------------------------------------------------
+   Isolated module. It only READS existing movie records (gameState via
+   getCompetitionEligibleMovies / isCompletedTheatricalMovie /
+   getPrimaryMaleActor) and never writes to gameState, saves, or any existing
+   formula. All names below are new and prefixed IR_ / ir.
+   ========================================================================== */
+(function () {
+  'use strict';
+
+  // Verdict order, strongest first. Labels are exactly those returned by the
+  // game's existing calculateFinalStatus(); this only orders them.
+  const IR_VERDICT_ORDER = ['INDUSTRY HIT','ALL-TIME BLOCKBUSTER','BLOCKBUSTER','SUPER HIT','HIT','ABOVE AVERAGE','AVERAGE','BELOW AVERAGE','FLOP','DISASTER'];
+  const IR_LANGUAGES = ['Hindi','Tamil','Telugu','Malayalam','Kannada'];
+  const IR_NAMED_MARKETS = [
+    { label: 'Chinese Market',     territories: ['China'] },
+    { label: 'USA / English Market', territories: ['USA'] },
+    { label: 'Japanese Market',    territories: ['Japan'] },
+    { label: 'Middle East Market', territories: ['UAE'] },
+    { label: 'UK / English Market', territories: ['United Kingdom'] },
+    { label: 'Russian Market',     territories: ['Russia'] }
+  ];
+
+  const irNum = v => (v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v))) ? Number(v) : null;
+  const irEsc = s => (typeof escapeHtml === 'function') ? escapeHtml(String(s)) : String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  function irPool() {
+    try {
+      const list = (typeof getCompetitionEligibleMovies === 'function' ? getCompetitionEligibleMovies() : []).filter(m => m && m.name);
+      // One record per stable movie id (titles are never used). When the same id
+      // is stored twice, prefer the completed-run record. Records without an id
+      // are kept as separate movies. This builds a new array; nothing is mutated.
+      const byId = new Map(), out = [];
+      list.forEach(m => {
+        if (m.id === undefined || m.id === null || m.id === '') { out.push(m); return; }
+        const k = String(m.id);
+        if (!byId.has(k)) { byId.set(k, out.length); out.push(m); }
+        else if (!irIsFinal(out[byId.get(k)]) && irIsFinal(m)) out[byId.get(k)] = m;
+      });
+      return out;
+    }
+    catch (e) { console.error('Industry Rankings: movie pool unavailable', e); return []; }
+  }
+  function irIsFinal(m) { try { return isCompletedTheatricalMovie(m); } catch (e) { return false; } }
+
+  // Lead Hero = the game's own primary male actor rule (cast.hero[0]).
+  function irLeadHero(m) {
+    try {
+      const a = getPrimaryMaleActor(m);
+      return a && a.name ? String(a.name) : null;
+    } catch (e) { return null; }
+  }
+
+  function irTerritory(m, t) {
+    if (!m || m.territoryTrackingVersion !== TERRITORY_BOX_OFFICE_VERSION || !m.territoryBoxOffice) return null;
+    return m.territoryBoxOffice[t] || null;
+  }
+  // India opening mirrors what the existing India card already shows.
+  function irIndiaOpening(m) {
+    const rec = irTerritory(m, 'India');
+    if (!rec) return null;
+    const src = m.openingWeekCollectionByIndiaLanguage || (m._step12COpeningWeek && m._step12COpeningWeek.byIndiaLanguage) || null;
+    if (src && typeof src === 'object') {
+      const rows = IR_LANGUAGES.map(l => src[l]).filter(r => r && irNum(r.openingWeekCollection) !== null);
+      if (rows.length) return rows.reduce((s, r) => s + Number(r.openingWeekCollection), 0);
+    }
+    return irNum(rec.opening);
+  }
+  // Language-market opening, read from the stored per-language Step 12C rows.
+  // Those rows exist only for languages the movie actually released in
+  // (original + selected dubbing), so no fallback to India total is used.
+  function irLangOpening(m, lang) {
+    const primary = m && m.openingWeekCollectionByIndiaLanguage;
+    const fallback = m && m._step12COpeningWeek && m._step12COpeningWeek.byIndiaLanguage;
+    const row = (primary && typeof primary === 'object' && primary[lang]) || (fallback && typeof fallback === 'object' && fallback[lang]) || null;
+    return row ? irNum(row.openingWeekCollection) : null;
+  }
+  // Languages a movie is known to have released in inside India: stored
+  // per-language rows (either source), its selected dubbing languages, and its
+  // original language when that is one of the five Indian languages.
+  function irIndiaReleaseLanguages(m) {
+    const set = new Set();
+    [m && m.openingWeekCollectionByIndiaLanguage, m && m._step12COpeningWeek && m._step12COpeningWeek.byIndiaLanguage].forEach(src => {
+      if (src && typeof src === 'object') IR_LANGUAGES.forEach(l => { if (src[l] && typeof src[l] === 'object') set.add(l); });
+    });
+    const named = [].concat(Array.isArray(m && m.dubbingLanguages) ? m.dubbingLanguages : [], [m && m.originalLanguage]);
+    named.forEach(v => { const hit = IR_LANGUAGES.find(l => l.toLowerCase() === String(v || '').trim().toLowerCase()); if (hit) set.add(hit); });
+    return set;
+  }
+  // Backfill only when original weekly India market history and per-language
+  // opening rows are both present. This mirrors the existing live language
+  // market allocation and never derives a language value from India finalGross.
+  function irBackfillLanguageLifetime(m) {
+    if (!m || m.lifetimeCollectionByIndiaLanguage ||
+        !Array.isArray(m.weeklyCollections) || !m.weeklyCollections.length) return;
+    const src = m.openingWeekCollectionByIndiaLanguage ||
+      (m._step12COpeningWeek && m._step12COpeningWeek.byIndiaLanguage);
+    if (!src || typeof src !== 'object') return;
+    const order = IR_LANGUAGES.filter(lang => src[lang] &&
+      Number.isFinite(Number(src[lang].openingWeekCollection)) &&
+      Number(src[lang].openingWeekCollection) >= 0);
+    const openingSum = order.reduce((sum, lang) => sum + Number(src[lang].openingWeekCollection), 0);
+    if (!order.length || !(openingSum > 0)) return;
+    const markets = m.weeklyMarketCollections;
+    const maxWeeks = Math.min(BOX_OFFICE_RUN_WEEKS, m.weeklyCollections.length);
+    const totals = Object.fromEntries(order.map(lang => [lang, 0]));
+    for (let week = 1; week <= maxWeeks; week++) {
+      const row = markets && markets[week];
+      const india = Number(row && row.India);
+      if (!row || !Number.isFinite(india) || india < 0) return;
+      let assigned = 0, biggest = order[0];
+      const values = {};
+      order.forEach(lang => {
+        const opening = Number(src[lang].openingWeekCollection);
+        values[lang] = Number((india * opening / openingSum).toFixed(2));
+        assigned += values[lang];
+        if (opening > Number(src[biggest].openingWeekCollection)) biggest = lang;
+      });
+      values[biggest] = Number((values[biggest] + india - assigned).toFixed(2));
+      order.forEach(lang => { totals[lang] += values[lang]; });
+    }
+    m.lifetimeCollectionByIndiaLanguage = {};
+    order.forEach(lang => {
+      m.lifetimeCollectionByIndiaLanguage[lang] = Number(totals[lang].toFixed(2));
+    });
+    m.lifetimeCollectionByIndiaLanguageVersion = 1;
+  }
+  function irLangLifetime(m, lang) {
+    if (!m || !irIndiaReleaseLanguages(m).has(lang)) return null;
+    irBackfillLanguageLifetime(m);
+    const data = m.lifetimeCollectionByIndiaLanguage;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+    return irNum(data[lang]);
+  }
+  function irIndiaLifetime(m) { const r = irTerritory(m, 'India'); return r ? irNum(r.finalGross) : null; }
+  function irMarketSum(m, territories, field) {
+    let total = 0, found = false;
+    territories.forEach(t => { const r = irTerritory(m, t); const v = r ? irNum(r[field]) : null; if (v !== null) { total += v; found = true; } });
+    return found ? total : null;
+  }
+  function irOtherOverseasTerritories() {
+    const named = new Set(['India'].concat(...IR_NAMED_MARKETS.map(x => x.territories)));
+    return (typeof TERRITORY_ORDER !== 'undefined' ? TERRITORY_ORDER : []).filter(t => !named.has(t));
+  }
+
+  // value > 0 only: a movie with no release/collection in a market is not ranked.
+  function irRank(entries, limit) {
+    return entries.slice().sort((a, b) => {
+      if (b.sort !== a.sort) return b.sort - a.sort;
+      if (b.tie !== a.tie) return b.tie - a.tie;
+      const n = String(a.m.name).localeCompare(String(b.m.name));
+      return n !== 0 ? n : String(a.m.id || '').localeCompare(String(b.m.id || ''));
+    }).slice(0, limit);
+  }
+  function irCollectionList(pool, valueFn, needFinal, langFilter, limit) {
+    const rows = [];
+    pool.forEach(m => {
+      if (needFinal && !irIsFinal(m)) return;
+      if (langFilter && String(m.originalLanguage || '').trim().toLowerCase() !== langFilter.toLowerCase()) return;
+      const v = valueFn(m);
+      if (v === null || !(v > 0)) return;
+      rows.push({ m, sort: v, tie: 0, stat: formatCollectionCr(v) });
+    });
+    return irRank(rows, limit);
+  }
+
+  function irRow(rank, e) {
+    const hero = irLeadHero(e.m);
+    return `<div class="movie-card" style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; gap:10px;">
+      <span style="max-width:68%; color:var(--text-main); font-size:13px;"><strong>#${rank}</strong> · ${irEsc(e.m.name)}
+        <span style="display:block; color:var(--text-dim); font-size:11px; margin-top:3px;">Lead Hero: ${hero ? irEsc(hero) : 'Unavailable'}</span></span>
+      <span style="color:var(--accent-gold); font-weight:600; text-align:right; font-size:12px;">${e.stat}</span>
+    </div>`;
+  }
+  function irBlock(title, entries) {
+    const body = entries.length
+      ? entries.map((e, i) => irRow(i + 1, e)).join('')
+      : '<div class="movie-detail-item"><span>No eligible movies yet.</span></div>';
+    return `<div class="stats-section-title">${irEsc(title)}</div><div class="movies-list">${body}</div>`;
+  }
+
+  window.renderIndustryRankingsView = function renderIndustryRankingsView() {
+    const host = document.getElementById('industryRankingsContainer');
+    if (!host) return;
+    try {
+      const pool = irPool();
+      let html = '<div class="stats-section-title" style="font-size:1rem;">🇮🇳 OVERALL INDIA RANKINGS</div>';
+
+      html += irBlock('👑 Opening King — Top 5', irCollectionList(pool, irIndiaOpening, false, null, 5));
+      html += irBlock('🏆 Lifetime King — Top 5', irCollectionList(pool, irIndiaLifetime, true, null, 5));
+
+      const wom = [];
+      pool.forEach(m => {
+        if (!irIsFinal(m)) return;
+        const w = irNum(m.wordOfMouthScore);
+        if (w === null) return;
+        wom.push({ m, sort: w, tie: 0, stat: `WOM ${w}` });
+      });
+      html += irBlock('🗣️ WOM King — Top 5', irRank(wom, 5));
+
+      const hit = [];
+      pool.forEach(m => {
+        if (!irIsFinal(m)) return;
+        const verdict = String(m.verdict || m.finalStatus || '');
+        const idx = IR_VERDICT_ORDER.indexOf(verdict);
+        const profit = irNum(m.profit);
+        if (idx < 0 || profit === null) return;
+        hit.push({ m, sort: IR_VERDICT_ORDER.length - idx, tie: profit, stat: `${irEsc(verdict)} · Profit ${formatCrores(profit)}` });
+      });
+      html += irBlock('🎯 Hit Machine — Top 7', irRank(hit, 7));
+
+      // Market success = territory finalGross > 0 and the territory's stored
+      // releaseROI (finalGross - releaseCost) > 0. Each territory counts once.
+      const mk = [];
+      pool.forEach(m => {
+        if (!irIsFinal(m) || !m.territoryBoxOffice || m.territoryTrackingVersion !== TERRITORY_BOX_OFFICE_VERSION) return;
+        let count = 0, combined = 0;
+        Object.keys(m.territoryBoxOffice).forEach(t => {
+          const r = m.territoryBoxOffice[t];
+          const g = r ? irNum(r.finalGross) : null, roi = r ? irNum(r.releaseROI) : null;
+          if (g !== null && g > 0 && roi !== null && roi > 0) { count++; combined += g; }
+        });
+        if (count > 0) mk.push({ m, sort: count, tie: combined, stat: `${count} markets · ${formatCollectionCr(combined)}` });
+      });
+      html += irBlock('🌐 Multiple Language Markets King — Top 5', irRank(mk, 5));
+
+      html += '<div class="stats-section-title" style="font-size:1rem; margin-top:22px;">🗣️ ORIGINAL-LANGUAGE RANKINGS (India only)</div>';
+      IR_LANGUAGES.forEach(lang => {
+        html += irBlock(`${lang} Opening King — Top 5`, irCollectionList(pool, m => irLangOpening(m, lang), false, null, 5));
+        html += irBlock(`${lang} Lifetime King — Top 5`, irCollectionList(pool, m => irLangLifetime(m, lang), true, null, 5));
+      });
+
+      html += '<div class="stats-section-title" style="font-size:1rem; margin-top:22px;">🌍 OVERSEAS MARKET RANKINGS</div>';
+      const markets = IR_NAMED_MARKETS.concat([{ label: 'Other Overseas Market', territories: irOtherOverseasTerritories() }]);
+      markets.forEach(mkt => {
+        html += irBlock(`${mkt.label} Opening King — Top 5`, irCollectionList(pool, m => irMarketSum(m, mkt.territories, 'opening'), false, null, 5));
+        html += irBlock(`${mkt.label} Lifetime King — Top 5`, irCollectionList(pool, m => irMarketSum(m, mkt.territories, 'finalGross'), true, null, 5));
+      });
+
+      host.innerHTML = html;
+    } catch (e) {
+      console.error('Industry Rankings render failed:', e);
+      host.innerHTML = '<div class="movie-detail-item"><span>Industry Rankings are temporarily unavailable.</span></div>';
+    }
+  };
+})();
+</script>
 
 </body>
 </html>
