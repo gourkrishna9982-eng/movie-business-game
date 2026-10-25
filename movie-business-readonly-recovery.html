@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Movie Business 3 — Read-only Save Recovery</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+:root{color-scheme:dark;--bg:#10131a;--panel:#1a202b;--text:#f3f5f8;--muted:#aab4c4;--line:#354052;--green:#7ce6b4;--yellow:#f2d58a;--red:#ff9e9e}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#10131a,#172235);color:var(--text);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:20px}
+main{max-width:850px;margin:0 auto}.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;margin:14px 0}
+h1{font-size:1.5rem;margin:0 0 8px}h2{font-size:1.1rem;margin:0 0 8px}p{margin:8px 0;color:var(--muted)}
+button{border:1px solid #516079;border-radius:10px;padding:11px 14px;background:#26364c;color:white;font-weight:700;cursor:pointer;margin:6px 6px 6px 0}
+button:disabled{opacity:.45;cursor:not-allowed}.safe{color:var(--green)}.warn{color:var(--yellow)}.error{color:var(--red)}
+.status{white-space:pre-wrap;overflow-wrap:anywhere;background:#111722;border-radius:10px;padding:12px;margin-top:10px}
+.card{border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0}
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.meta div{background:#111722;padding:10px;border-radius:9px;overflow-wrap:anywhere}.meta b{display:block;color:var(--muted);font-size:.82rem}
+small{color:var(--muted)}code{overflow-wrap:anywhere}a{color:#9dc7ff}
+</style>
+</head>
+<body>
+<main>
+  <h1>Movie Business 3 — Read-only Recovery</h1>
+  <p>This separate helper only reads the game's hidden Google Drive app-data save and lets you download a backup. It does not start the game, alter local storage, create saves, or send any write/update/delete requests to Drive.</p>
+  <div class="panel">
+    <h2>Before you begin</h2>
+    <p>Use the same Google account that held your old studio. This helper is intended to be uploaded into the <code>movie-business-game</code> GitHub Pages repository so it runs on the same website origin as the game.</p>
+    <p class="warn">Do not use NEW STUDIO, SAVE TO DRIVE, or CONTINUE in the main game until you have checked and downloaded the save here.</p>
+    <button id="connectBtn">Sign in to Google Drive (read-only helper)</button>
+    <div id="status" class="status">Not connected. No Drive request has been made.</div>
+  </div>
+  <div class="panel">
+    <h2>Save files found</h2>
+    <p>The helper searches only the app's hidden <code>appDataFolder</code> for <code>movie-business-save.json</code>.</p>
+    <div id="files"><small>Connect Google Drive to search.</small></div>
+  </div>
+  <div class="panel">
+    <h2>Safety notes</h2>
+    <p>Google's appDataFolder is hidden from the normal Drive website. A missing save may mean the file is absent, the wrong Google account/app authorization was used, or access failed; it does not by itself prove that every older copy is gone.</p>
+    <p>Drive may not retain downloadable older revisions unless they were marked “Keep forever”. This helper lists revision metadata, but never changes revision settings.</p>
+  </div>
+</main>
+<script>
+(() => {
+  'use strict';
+  const CLIENT_ID = '92954333195-07rkr9urs5pmbbtp6mdf2bp9t7a6romm.apps.googleusercontent.com';
+  const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+  const SAVE_NAME = 'movie-business-save.json';
+  let accessToken = null;
+  let tokenClient = null;
+  const $ = id => document.getElementById(id);
+  const status = (message, cls='') => {
+    $('status').className = 'status ' + cls;
+    $('status').textContent = message;
+  };
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  async function api(url) {
+    if (!accessToken) throw new Error('Google Drive is not connected.');
+    const res = await fetch(url, {method:'GET', headers:{Authorization:'Bearer '+accessToken}});
+    if (!res.ok) {
+      let detail = '';
+      try { const j = await res.json(); detail = j.error?.message || ''; } catch {}
+      throw new Error(`Drive API ${res.status}${detail ? ': '+detail : ''}`);
+    }
+    return res;
+  }
+  function saveSummary(state, file) {
+    const movies = Array.isArray(state?.movies) ? state.movies.length : 'unknown';
+    const savedAt = state?._saveMeta?.savedAt || file.modifiedTime || 'not recorded';
+    return `<div class="meta">
+      <div><b>Studio name</b>${escapeHtml(state?.studioName || '(not present in this save)')}</div>
+      <div><b>Owner</b>${escapeHtml(state?.ownerName || '(not recorded)')}</div>
+      <div><b>Week / Year</b>${escapeHtml(state?.currentWeek ?? '?')} / ${escapeHtml(state?.currentYear ?? '?')}</div>
+      <div><b>Movies in save</b>${escapeHtml(movies)}</div>
+      <div><b>Cash on hand</b>${escapeHtml(state?.cashOnHand ?? '?')}</div>
+      <div><b>Save timestamp</b>${escapeHtml(savedAt)}</div>
+      <div><b>Drive modified</b>${escapeHtml(file.modifiedTime || 'unknown')}</div>
+      <div><b>File size</b>${escapeHtml(file.size ? `${file.size} bytes` : 'unknown')}</div>
+    </div>`;
+  }
+  function downloadJson(obj, filename) {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+  async function readCurrent(file, card) {
+    const details = card.querySelector('.details');
+    details.textContent = 'Reading current save…';
+    try {
+      const response = await api(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.id)}?alt=media`);
+      const state = await response.json();
+      if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Error('The file content is not a JSON game-state object.');
+      details.innerHTML = saveSummary(state, file);
+      const btn = document.createElement('button');
+      btn.textContent = 'Download this current save JSON backup';
+      btn.addEventListener('click', () => downloadJson(state, 'movie-business-save-current-backup.json'));
+      details.appendChild(btn);
+      const revBtn = document.createElement('button');
+      revBtn.textContent = 'List revision history (read-only)';
+      revBtn.addEventListener('click', () => listRevisions(file, card));
+      details.appendChild(revBtn);
+      status('Current save was read successfully. Nothing was written to Drive.', 'safe');
+    } catch (e) {
+      details.textContent = 'Could not read this save: ' + e.message;
+      status('Read failed: ' + e.message, 'error');
+    }
+  }
+  async function listRevisions(file, card) {
+    const details = card.querySelector('.revisions');
+    details.textContent = 'Loading revision metadata…';
+    try {
+      const res = await api(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.id)}/revisions?pageSize=1000&fields=revisions(id,modifiedTime,keepForever,size,mimeType,originalFilename),nextPageToken`);
+      const data = await res.json();
+      const revisions = data.revisions || [];
+      if (!revisions.length) {
+        details.textContent = 'No revision metadata was returned. This does not prove no recoverable copy exists elsewhere.';
+        return;
+      }
+      details.innerHTML = '<p>Revision metadata only. Download is offered only for revisions marked Keep forever, because Google restricts downloading older blob revisions otherwise.</p>';
+      revisions.sort((a,b) => String(b.modifiedTime||'').localeCompare(String(a.modifiedTime||'')));
+      revisions.forEach(rev => {
+        const row = document.createElement('div'); row.className = 'card';
+        row.innerHTML = `<b>Revision</b> ${escapeHtml(rev.id)}<br><b>Modified:</b> ${escapeHtml(rev.modifiedTime || 'unknown')}<br><b>Keep forever:</b> ${rev.keepForever ? 'Yes' : 'No'}<br><b>Size:</b> ${escapeHtml(rev.size || 'unknown')}`;
+        if (rev.keepForever) {
+          const b = document.createElement('button'); b.textContent = 'Try download this retained revision';
+          b.addEventListener('click', async () => {
+            b.disabled = true; b.textContent = 'Downloading…';
+            try {
+              const rr = await api(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.id)}/revisions/${encodeURIComponent(rev.id)}?alt=media`);
+              const text = await rr.text();
+              const parsed = JSON.parse(text);
+              downloadJson(parsed, `movie-business-save-revision-${rev.id}.json`);
+              b.textContent = 'Downloaded JSON backup';
+              status('Retained revision downloaded. Drive was not modified.', 'safe');
+            } catch (e) {
+              b.disabled = false; b.textContent = 'Try download this retained revision';
+              status('Revision download failed: '+e.message, 'error');
+            }
+          });
+          row.appendChild(b);
+        } else {
+          const note = document.createElement('p'); note.textContent = 'Not marked Keep forever; Drive may not allow its content to be downloaded through the revisions API.';
+          row.appendChild(note);
+        }
+        details.appendChild(row);
+      });
+      if (data.nextPageToken) {
+        const note = document.createElement('p'); note.className='warn';
+        note.textContent = 'Drive returned a next-page token. This first page may not contain every revision; this helper does not change data and currently displays the returned page only.';
+        details.appendChild(note);
+      }
+    } catch (e) {
+      details.textContent = 'Could not list revisions: ' + e.message;
+    }
+  }
+  async function findSaves() {
+    $('files').innerHTML = '<p>Searching the app's hidden save folder…</p>';
+    try {
+      const q = encodeURIComponent(`name='${SAVE_NAME}' and trashed=false`);
+      const res = await api(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&pageSize=100&fields=files(id,name,mimeType,size,modifiedTime),nextPageToken`);
+      const data = await res.json();
+      const files = data.files || [];
+      if (!files.length) {
+        $('files').innerHTML = '<p class="warn">No file with the expected name was found in this app’s hidden folder for the account you authorized.</p><p>Do not create a new studio yet. Double-check that this is the same Google account as before. A missing file can’t be restored by this helper; we should next check whether a local browser save or another copy exists.</p>';
+        status('Drive access succeeded, but no matching save file was found. No writes were made.', 'warn');
+        return;
+      }
+      $('files').innerHTML = '';
+      files.forEach(file => {
+        const card = document.createElement('div'); card.className='card';
+        card.innerHTML = `<h2>${escapeHtml(file.name)}</h2><p>File ID: <code>${escapeHtml(file.id)}</code></p><p>Modified: ${escapeHtml(file.modifiedTime || 'unknown')}</p><div class="details"></div><div class="revisions"></div>`;
+        const b = document.createElement('button'); b.textContent = 'Inspect save details (read-only)';
+        b.addEventListener('click', () => readCurrent(file, card));
+        card.insertBefore(b, card.querySelector('.details'));
+        $('files').appendChild(card);
+      });
+      status(`Found ${files.length} matching save file(s). Select Inspect save details. No writes were made.`, 'safe');
+    } catch (e) {
+      $('files').innerHTML = '<p class="error">Search failed. Check the error message above.</p>';
+      status('Search failed: '+e.message, 'error');
+    }
+  }
+  $('connectBtn').addEventListener('click', () => {
+    if (!window.google?.accounts?.oauth2) {
+      status('Google sign-in library is still loading. Wait a few seconds and try again.', 'warn');
+      return;
+    }
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: SCOPE,
+      callback: async response => {
+        if (!response || !response.access_token) {
+          status('Google authorization did not return an access token. Try again or check the account.', 'error');
+          return;
+        }
+        accessToken = response.access_token;
+        $('connectBtn').disabled = true;
+        status('Connected. Running read-only search…', 'safe');
+        await findSaves();
+        $('connectBtn').disabled = false;
+      }
+    });
+    tokenClient.requestAccessToken({prompt:'consent'});
+  });
+})();
+</script>
+</body>
+</html>
