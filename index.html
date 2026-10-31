@@ -998,6 +998,11 @@ body {
       <button type="button" onclick="manualSaveToGoogleDrive()" style="margin-left:6px;padding:11px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(110,231,183,.08);color:#6ee7b7;font-weight:700;cursor:pointer;">
         💾 SAVE TO DRIVE
       </button>
+      <div style="margin-top:8px;">
+        <button type="button" onclick="MB3Recovery.open()" style="padding:11px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(99,102,241,.15);color:#a5b4fc;font-weight:700;cursor:pointer;">
+          🛟 DATA RECOVERY
+        </button>
+      </div>
       <div id="driveStatus" style="margin-top:8px;font-size:12px;color:#9aa4b2;">Google Drive: Not connected</div>
     </div>
   </div>
@@ -1442,6 +1447,20 @@ body {
                             <div class="dash-info">
                                 <h3>Industry Rankings</h3>
                                 <p>Opening, Lifetime, WOM, Hit Machine & market kings</p>
+                            </div>
+                        </div>
+                        <span>➔</span>
+                    </div>
+                </div>
+
+                <!-- DATA RECOVERY (additive) -->
+                <div class="dashboard-grid" style="margin-top: 18px;">
+                    <div class="dash-card" onclick="MB3Recovery.open()">
+                        <div class="dash-card-left">
+                            <div class="dash-icon">🛟</div>
+                            <div class="dash-info">
+                                <h3>Data Recovery</h3>
+                                <p>Backups, restore, export & Google Drive history</p>
                             </div>
                         </div>
                         <span>➔</span>
@@ -17542,6 +17561,700 @@ function ensureGenreCombinationRating(movie){
     }
   };
 })();
+</script>
+
+<script>
+/* ==========================================================================
+   DATA RECOVERY SYSTEM (additive)
+   --------------------------------------------------------------------------
+   Isolated module. It never changes game formulas or the save format.
+   It wraps four existing functions only to OBSERVE / PROTECT saves:
+     saveLocalGameState  - keeps a backup of the old save before a lower-
+                           progress save replaces it, and snapshots progress
+     enterGame           - backs up whatever CONTINUE loaded
+     handleLogin         - shows the recovery banner if data looks lost
+     goContinue          - offers recovery if no save was found
+   Backups live in IndexedDB (separate from the game's own save), can be
+   mirrored to a SEPARATE Google Drive file (movie-business-backups.json in
+   the same appDataFolder - the game's own movie-business-save.json is never
+   touched by backups), and can be exported/imported as a file.
+   ========================================================================== */
+(function () {
+  'use strict';
+  if (window.MB3Recovery) return;
+
+  const TEST = !!window.__MB3_REC_TEST__;
+  const DB_NAME = 'mb3_recovery_db', STORE = 'backups';
+  const MAX_AUTO = 30, MAX_MANUAL = 60, PROTECT_TOP = 5;
+  const AUTO_MIN_MS = 2 * 60 * 1000;
+  const DRIVE_SYNC_MIN_MS = 15 * 60 * 1000;
+  const DRIVE_BACKUP_FILE = 'movie-business-backups.json';
+
+  /* ---------- small helpers ---------- */
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  function hashStr(s) {
+    let h1 = 5381, h2 = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      h1 = ((h1 << 5) + h1 + c) | 0;
+      h2 = Math.imul(h2 ^ c, 16777619) | 0;
+    }
+    return h1 + ':' + h2 + ':' + s.length;
+  }
+  function safeGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function safeParse(s) { try { return JSON.parse(s); } catch (e) { return null; } }
+  function fmtDT(ts) { try { return new Date(ts).toLocaleString(); } catch (e) { return String(ts); } }
+  function fmtSize(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
+
+  function gEmail() { try { return (typeof currentUserEmail !== 'undefined' && currentUserEmail) ? String(currentUserEmail).toLowerCase() : ''; } catch (e) { return ''; } }
+  function gToken() { try { return typeof googleDriveAccessToken !== 'undefined' ? googleDriveAccessToken : null; } catch (e) { return null; } }
+  function gState() { try { return typeof gameState !== 'undefined' ? gameState : null; } catch (e) { return null; } }
+  function keyFor(email) { return (typeof localSaveKey === 'function') ? localSaveKey(email) : 'mb3_save_' + email; }
+  function gameActive() { try { const el = document.getElementById('gameRoot'); return !!(el && el.classList.contains('active')); } catch (e) { return false; } }
+
+  /* ---------- game-state knowledge ---------- */
+  function isValidState(st) {
+    return !!st && typeof st === 'object' && !Array.isArray(st) &&
+      Number.isFinite(Number(st.currentWeek)) && Number.isFinite(Number(st.currentYear)) &&
+      Array.isArray(st.movies) && Array.isArray(st.completedMovies);
+  }
+  function summarize(st) {
+    return {
+      studio: String(st.studioName || ''), owner: String(st.ownerName || ''),
+      week: Number(st.currentWeek) || 0, year: Number(st.currentYear) || 0,
+      cash: Number(st.cashOnHand),
+      released: st.completedMovies.length, inProd: st.movies.length,
+      houses: Array.isArray(st.productionHouses) ? st.productionHouses.length : 0,
+      awards: (st.awardsHistory && typeof st.awardsHistory === 'object') ? Object.keys(st.awardsHistory).length : 0
+    };
+  }
+  function elapsedWeeks(s) { return (s.year - 2000) * 52 + s.week; }
+  function score(s) { return (s.year * 52 + s.week) * 100000 + s.released * 100 + Math.min(99, s.inProd); }
+  function sumLine(s) {
+    if (!s) return '';
+    const p = [];
+    if (s.studio) p.push(s.studio);
+    p.push('Week ' + s.week + ', Year ' + s.year);
+    if (Number.isFinite(s.cash)) p.push('Cash ' + (Math.round(s.cash * 100) / 100).toLocaleString() + ' Cr');
+    p.push(s.released + ' released');
+    if (s.inProd) p.push(s.inProd + ' in production');
+    if (s.houses) p.push(s.houses + ' production house' + (s.houses === 1 ? '' : 's'));
+    return p.join(' \u00b7 ');
+  }
+  function stripMeta(st) { const o = Object.assign({}, st); delete o._saveMeta; return o; }
+
+  /* ---------- backup records ---------- */
+  function buildRecord(state, label, email, opts) {
+    const json = JSON.stringify(state);
+    const chash = hashStr(JSON.stringify(stripMeta(state)));
+    const meta = state && state._saveMeta;
+    return {
+      id: Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      ts: Date.now(),
+      email: String(email || (meta && meta.email) || '').toLowerCase(),
+      label: label || 'Auto',
+      manual: !!(opts && opts.manual),
+      sum: summarize(state), size: json.length, chash, json
+    };
+  }
+  // Rebuilds every derived field from the actual JSON, so imported / Drive
+  // records can never carry fake summaries or break the UI.
+  function normalize(rec, fallbackEmail) {
+    if (!rec || typeof rec.json !== 'string') return null;
+    const st = safeParse(rec.json);
+    if (!isValidState(st)) return null;
+    const meta = st._saveMeta || {};
+    return {
+      id: String(rec.id || (Date.now() + '-' + Math.random().toString(36).slice(2, 8))).slice(0, 64),
+      ts: Number.isFinite(Number(rec.ts)) ? Number(rec.ts) : Date.now(),
+      email: String(rec.email || meta.email || fallbackEmail || '').toLowerCase(),
+      label: String(rec.label || 'Imported').slice(0, 120),
+      manual: !!rec.manual,
+      sum: summarize(st), size: rec.json.length,
+      chash: hashStr(JSON.stringify(stripMeta(st))), json: rec.json
+    };
+  }
+
+  /* ---------- storage (IndexedDB) ---------- */
+  let dbPromise = null;
+  const IDB = {
+    open() {
+      if (dbPromise) return dbPromise;
+      dbPromise = new Promise((res, rej) => {
+        if (!window.indexedDB) return rej(new Error('IndexedDB is not available in this browser.'));
+        const r = indexedDB.open(DB_NAME, 1);
+        r.onupgradeneeded = () => { r.result.createObjectStore(STORE, { keyPath: 'id' }); };
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error || new Error('Could not open backup storage.'));
+      });
+      dbPromise.catch(() => { dbPromise = null; });
+      return dbPromise;
+    },
+    async all() {
+      const db = await this.open();
+      return new Promise((res, rej) => {
+        const q = db.transaction(STORE).objectStore(STORE).getAll();
+        q.onsuccess = () => res(q.result.sort((a, b) => b.ts - a.ts));
+        q.onerror = () => rej(q.error);
+      });
+    },
+    async put(rec) {
+      const db = await this.open();
+      return new Promise((res, rej) => {
+        const t = db.transaction(STORE, 'readwrite');
+        t.objectStore(STORE).put(rec);
+        t.oncomplete = () => res(rec);
+        t.onerror = t.onabort = () => rej(t.error || new Error('Could not write backup.'));
+      });
+    },
+    async del(ids) {
+      const db = await this.open();
+      return new Promise((res, rej) => {
+        const t = db.transaction(STORE, 'readwrite'), s = t.objectStore(STORE);
+        ids.forEach(id => s.delete(id));
+        t.oncomplete = () => res();
+        t.onerror = t.onabort = () => rej(t.error);
+      });
+    }
+  };
+  const Store = (TEST && window.__MB3_REC_STORE__) || IDB;
+
+  let chain = Promise.resolve();
+  function enqueue(fn) { const p = chain.then(fn); chain = p.catch(() => {}); return p; }
+
+  async function prune(list) {
+    const byEmail = {};
+    list.forEach(r => { (byEmail[r.email] = byEmail[r.email] || []).push(r); });
+    const drop = [];
+    Object.keys(byEmail).forEach(k => {
+      const arr = byEmail[k];
+      const prot = new Set(arr.slice().sort((a, b) => score(b.sum) - score(a.sum) || b.ts - a.ts).slice(0, PROTECT_TOP).map(r => r.id));
+      arr.filter(r => !r.manual && !prot.has(r.id)).sort((a, b) => b.ts - a.ts).slice(MAX_AUTO).forEach(r => drop.push(r.id));
+      arr.filter(r => r.manual && !prot.has(r.id)).sort((a, b) => b.ts - a.ts).slice(MAX_MANUAL).forEach(r => drop.push(r.id));
+    });
+    if (drop.length) await Store.del(drop);
+  }
+
+  async function storeRecord(rec) {
+    const list = await Store.all();
+    const dup = list.find(r => r.email === rec.email && r.chash === rec.chash);
+    if (dup) {
+      if (rec.manual && !dup.manual) { dup.manual = true; dup.label = rec.label; await Store.put(dup); }
+      return dup;
+    }
+    await Store.put(rec);
+    await prune(list.concat([rec]));
+    scheduleDriveSync();
+    return rec;
+  }
+  function queueBackup(state, label, email, opts) {
+    let rec;
+    try {
+      if (!isValidState(state)) return Promise.resolve(null);
+      rec = buildRecord(state, label, email, opts);   // snapshot taken NOW, synchronously
+    } catch (e) { console.warn('Backup snapshot failed:', e); return Promise.resolve(null); }
+    return enqueue(() => storeRecord(rec)).catch(e => { console.warn('Backup failed:', e); return null; });
+  }
+
+  /* ---------- automatic protection hooks ---------- */
+  const lastSum = {};   // email -> summary of the save currently on this device
+  const lastAuto = {};  // email -> { mark, ts }
+
+  function localSummary(email) {
+    const st = safeParse(safeGet(keyFor(email)) || 'null');
+    return isValidState(st) ? summarize(st) : null;
+  }
+  function maybeAutoSnapshot(email, state) {
+    const s = summarize(state);
+    const mark = [s.year, s.week, s.released, s.inProd, s.houses].join('/');
+    const last = lastAuto[email], now = Date.now();
+    if (!last || last.mark !== mark || now - last.ts >= AUTO_MIN_MS) {
+      lastAuto[email] = { mark, ts: now };
+      queueBackup(state, 'Auto', email);
+    }
+  }
+  function hookSave() {
+    const orig = window.saveLocalGameState;
+    if (typeof orig !== 'function') return;
+    window.saveLocalGameState = function (email, state) {
+      const key = String(email || '').toLowerCase();
+      try {
+        const sNew = isValidState(state) ? summarize(state) : null;
+        if (lastSum[key] === undefined) lastSum[key] = localSummary(key);
+        const prev = lastSum[key];
+        if (sNew && prev && score(prev) > score(sNew)) {
+          // A lower-progress save is about to replace a more advanced one: keep the old one.
+          const old = safeParse(safeGet(keyFor(key)) || 'null');
+          if (isValidState(old)) queueBackup(old, 'Auto: saved before a lower-progress save replaced it', key);
+        }
+      } catch (e) { console.warn('Recovery pre-save check failed:', e); }
+      const result = orig.apply(this, arguments);
+      try {
+        if (isValidState(state)) { lastSum[key] = summarize(state); maybeAutoSnapshot(key, state); }
+      } catch (e) { console.warn('Recovery post-save check failed:', e); }
+      return result;
+    };
+  }
+
+  let suppressEnter = false, dismissed = false;
+  function hookEnter() {
+    const orig = window.enterGame;
+    if (typeof orig !== 'function') return;
+    window.enterGame = function (loaded) {
+      const email = gEmail();
+      if (loaded && email && !suppressEnter) queueBackup(loaded, 'Auto: loaded when CONTINUE was pressed', email);
+      const r = orig.apply(this, arguments);
+      if (loaded && !suppressEnter) setTimeout(() => { promptIfNeeded().catch(() => {}); }, 1200);
+      return r;
+    };
+  }
+  function hookLogin() {
+    const origLogin = window.handleLogin;
+    if (typeof origLogin === 'function') {
+      window.handleLogin = function () {
+        const r = origLogin.apply(this, arguments);
+        Promise.resolve(r).then(() => afterLogin()).catch(() => {});
+        return r;
+      };
+    }
+    const origCont = window.goContinue;
+    if (typeof origCont === 'function') {
+      window.goContinue = function () {
+        const r = origCont.apply(this, arguments);
+        Promise.resolve(r).then(() => {
+          if (!gameActive() && gEmail()) setTimeout(() => { promptIfNeeded(true).catch(() => {}); }, 300);
+        }).catch(() => {});
+        return r;
+      };
+    }
+  }
+
+  /* ---------- health check ---------- */
+  async function healthCheck(email, listIn) {
+    const list = (listIn || await Store.all()).filter(r => r.email === email);
+    if (!list.length) return { status: 'ok', list };
+    const best = list.slice().sort((a, b) => score(b.sum) - score(a.sum))[0];
+    const raw = safeGet(keyFor(email));
+    if (!raw) return { status: 'missing', list, best };
+    const st = safeParse(raw);
+    if (!isValidState(st)) return { status: 'corrupted', list, best };
+    const cur = summarize(st);
+    const e1 = elapsedWeeks(best.sum), e0 = elapsedWeeks(cur);
+    if (e1 - e0 >= 8 && e0 <= e1 * 0.6) return { status: 'behind', list, best, cur };
+    return { status: 'ok', list, best, cur };
+  }
+  function healthMessage(h) {
+    if (h.status === 'missing') return 'No saved game was found on this device for this account, but recovery backups exist.';
+    if (h.status === 'corrupted') return 'Your saved game on this device looks corrupted. Recovery backups are available.';
+    if (h.status === 'behind') return 'Your current save (Week ' + h.cur.week + ', Year ' + h.cur.year + ') is far behind a backup (Week ' + h.best.sum.week + ', Year ' + h.best.sum.year + '). If your progress was lost or reset, restore that backup.';
+    return '';
+  }
+
+  /* ---------- restore ---------- */
+  async function restoreRecord(rec) {
+    const email = gEmail();
+    if (!email) throw new Error('Please log in with your Gmail first.');
+    const st = safeParse(rec.json);
+    if (!isValidState(st)) throw new Error('This backup is damaged or incomplete and cannot be restored.');
+    const key = keyFor(email);
+    const prevRaw = safeGet(key);
+
+    // 1) safety copy of whatever is current (live game if open, otherwise the saved one)
+    let current = null;
+    const live = gState();
+    if (gameActive() && isValidState(live)) current = live;
+    else if (prevRaw) { const p = safeParse(prevRaw); if (isValidState(p)) current = p; }
+    if (current) await queueBackup(current, 'Safety copy before restore', email, { manual: true });
+
+    // 2) write the restored save exactly like the game's own save does
+    st._saveMeta = Object.assign({}, st._saveMeta || {}, { savedAt: new Date().toISOString(), email, restoredFromBackup: rec.id });
+    const expected = JSON.stringify(st);
+    window.saveLocalGameState(email, st);
+    if (safeGet(key) !== expected) {
+      try { if (prevRaw !== null) localStorage.setItem(key, prevRaw); } catch (e) {}
+      throw new Error('Could not write the restored save to this device (storage may be full). Your previous data was not changed.');
+    }
+
+    // 3) cloud copy: CONTINUE prefers the Drive save, so it must hold the restored data too
+    let drive = 'not-connected';
+    if (gToken() && typeof driveSaveGameState === 'function') {
+      try { drive = (await driveSaveGameState(st)) ? 'updated' : 'failed'; } catch (e) { drive = 'failed'; }
+    }
+
+    // 4) load it into the running game using the game's own loader
+    suppressEnter = true;
+    try {
+      window.enterGame(st);
+    } catch (e) {
+      try { if (prevRaw !== null) localStorage.setItem(key, prevRaw); } catch (e2) {}
+      throw new Error('The game could not load the restored data (' + (e && e.message || e) + '). Your previous local save was put back. Please reload the page.');
+    } finally { suppressEnter = false; }
+    setTimeout(() => { try { if (typeof persistGameState === 'function') persistGameState(); } catch (e) {} }, 50);
+
+    const g = gState();
+    const verified = !!g && g.studioName === st.studioName && Number(g.currentWeek) === Number(st.currentWeek) &&
+      Number(g.currentYear) === Number(st.currentYear) && (g.completedMovies || []).length === st.completedMovies.length;
+    return { ok: true, drive, verified, sum: summarize(st) };
+  }
+
+  /* ---------- export / import / merge ---------- */
+  function pack(list, email) {
+    return JSON.stringify({ app: 'MovieBusiness3-Recovery', v: 1, exportedAt: new Date().toISOString(), email, backups: list });
+  }
+  async function mergeIn(records, fallbackEmail, asManual) {
+    const have = await Store.all();
+    const ids = new Set(have.map(r => r.id)), seen = new Set(have.map(r => r.email + '|' + r.chash));
+    let added = 0, skipped = 0;
+    for (const raw of records) {
+      const rec = normalize(raw, fallbackEmail);
+      if (!rec) { skipped++; continue; }
+      if (asManual) rec.manual = true;
+      if (seen.has(rec.email + '|' + rec.chash)) continue;
+      if (ids.has(rec.id)) rec.id = rec.id + '-' + Math.random().toString(36).slice(2, 5);
+      await Store.put(rec); ids.add(rec.id); seen.add(rec.email + '|' + rec.chash); added++;
+    }
+    return { added, skipped };
+  }
+  function download(name, text) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  }
+  function readFile(file) {
+    return new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => {
+        const j = safeParse(fr.result);
+        if (!j || !Array.isArray(j.backups)) return rej(new Error('This is not a Movie Business 3 backup file.'));
+        res(j.backups);
+      };
+      fr.onerror = () => rej(new Error('Could not read that file.'));
+      fr.readAsText(file);
+    });
+  }
+
+  /* ---------- Google Drive (uses the game's own Drive connection) ---------- */
+  function needDrive() {
+    if (!gToken() || typeof driveApi !== 'function') throw new Error('Google Drive is not connected. Use CONNECT GOOGLE DRIVE first.');
+  }
+  async function driveFindBackupFile() {
+    const q = "'appDataFolder' in parents and name='" + DRIVE_BACKUP_FILE + "' and trashed=false";
+    const r = await driveApi('https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) + '&spaces=appDataFolder&fields=files(id,name,modifiedTime)&pageSize=10');
+    if (!r.ok) throw await driveError(r, 'Drive backup lookup failed');
+    const j = await r.json();
+    return (j.files || [])[0] || null;
+  }
+  async function driveReadBackups(file) {
+    const r = await driveApi('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(file.id) + '?alt=media');
+    if (!r.ok) throw await driveError(r, 'Drive backup download failed');
+    const j = await r.json();
+    return Array.isArray(j && j.backups) ? j.backups : [];
+  }
+  async function driveWriteBackups(file, backups) {
+    const body = pack(backups, '');
+    if (file) {
+      const r = await driveApi('https://www.googleapis.com/upload/drive/v3/files/' + encodeURIComponent(file.id) + '?uploadType=media',
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body });
+      if (!r.ok) throw await driveError(r, 'Drive backup update failed');
+      return;
+    }
+    const b = '-------mb3RecoveryBoundary' + Date.now();
+    const multipart = '--' + b + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' +
+      JSON.stringify({ name: DRIVE_BACKUP_FILE, parents: ['appDataFolder'], mimeType: 'application/json' }) +
+      '\r\n--' + b + '\r\nContent-Type: application/json\r\n\r\n' + body + '\r\n--' + b + '--';
+    const r = await driveApi('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
+      { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + b }, body: multipart });
+    if (!r.ok) throw await driveError(r, 'Drive backup create failed');
+  }
+  function selectForDrive(all) {
+    const byEmail = {};
+    all.forEach(r => { (byEmail[r.email] = byEmail[r.email] || []).push(r); });
+    const out = {};
+    Object.keys(byEmail).forEach(k => {
+      const arr = byEmail[k];
+      arr.slice().sort((a, b) => score(b.sum) - score(a.sum) || b.ts - a.ts).slice(0, 3).forEach(r => { out[r.id] = r; });
+      arr.slice().sort((a, b) => b.ts - a.ts).slice(0, 8).forEach(r => { out[r.id] = r; });
+      arr.filter(r => r.manual).sort((a, b) => b.ts - a.ts).slice(0, 5).forEach(r => { out[r.id] = r; });
+    });
+    return Object.keys(out).map(k => out[k]);
+  }
+  async function syncToDrive() {
+    needDrive();
+    const file = await driveFindBackupFile();
+    const remote = file ? await driveReadBackups(file) : [];
+    await mergeIn(remote, '', false);            // never lose what is already on Drive
+    const merged = await Store.all();
+    const out = selectForDrive(merged);
+    await driveWriteBackups(file, out);
+    lastDriveSync = Date.now();
+    return out.length;
+  }
+  async function pullFromDrive() {
+    needDrive();
+    const file = await driveFindBackupFile();
+    if (!file) throw new Error('No recovery backups found on this Google account yet.');
+    return mergeIn(await driveReadBackups(file), '', false);
+  }
+  let lastDriveSync = 0, driveSyncBusy = false;
+  function scheduleDriveSync() {
+    if (TEST || driveSyncBusy || !gToken() || Date.now() - lastDriveSync < DRIVE_SYNC_MIN_MS) return;
+    driveSyncBusy = true;
+    setTimeout(() => {
+      syncToDrive().catch(e => console.warn('Auto Drive backup failed:', e)).finally(() => { driveSyncBusy = false; });
+    }, 3000);
+  }
+
+  // Drive version history of the game's own save file (read-only)
+  let revs = [], revFileId = null;
+  const revCache = {};
+  async function listRevisions() {
+    needDrive();
+    const file = await driveFindSaveFile();
+    if (!file) throw new Error('No cloud save file exists on this Google account.');
+    revFileId = file.id;
+    const r = await driveApi('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(file.id) + '/revisions?fields=revisions(id,modifiedTime,size)&pageSize=200');
+    if (!r.ok) throw await driveError(r, 'Could not read Drive version history');
+    const j = await r.json();
+    revs = (j.revisions || []).slice().sort((a, b) => String(b.modifiedTime).localeCompare(String(a.modifiedTime)));
+    return revs.length;
+  }
+  async function fetchRevisionState(id) {
+    needDrive();
+    if (!revFileId) throw new Error('Load the Drive history first.');
+    const r = await driveApi('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(revFileId) + '/revisions/' + encodeURIComponent(id) + '?alt=media');
+    if (!r.ok) throw await driveError(r, 'Could not download that Drive version');
+    const st = await r.json();
+    if (!isValidState(st)) throw new Error('That Drive version does not contain a complete game save.');
+    return st;
+  }
+
+  /* ==================== UI ==================== */
+  let host = null, lastList = [], styleDone = false;
+  const css = '' +
+    '.mb3r-ov{position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.78);display:flex;align-items:center;justify-content:center;padding:10px;font-family:inherit}' +
+    '.mb3r-box{background:#0f172a;color:#e5e7eb;border:1px solid rgba(255,255,255,.18);border-radius:14px;width:100%;max-width:600px;max-height:92vh;overflow:auto;padding:16px;box-shadow:0 10px 40px rgba(0,0,0,.6)}' +
+    '.mb3r-h{display:flex;justify-content:space-between;align-items:center;font-size:19px;font-weight:800;margin-bottom:6px}' +
+    '.mb3r-x{background:none;border:0;color:#9aa4b2;font-size:20px;cursor:pointer}' +
+    '.mb3r-p{font-size:13px;color:#9aa4b2;margin:6px 0}.mb3r-sec{font-size:14px;font-weight:700;margin:14px 0 4px;color:#c7d2fe}' +
+    '.mb3r-tools{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}' +
+    '.mb3r-b{background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:9px 12px;font-weight:700;font-size:12px;cursor:pointer}' +
+    '.mb3r-b.g{background:#059669}.mb3r-b.s{background:#1e2842;border:1px solid rgba(255,255,255,.18);color:#c7d2fe}.mb3r-b.d{background:#dc2626}' +
+    '.mb3r-item{display:flex;gap:8px;align-items:center;justify-content:space-between;background:#1e2842;border-radius:10px;padding:10px;margin:7px 0}' +
+    '.mb3r-item b{font-size:13px}.mb3r-item small{display:block;color:#9aa4b2;font-size:11px;margin-top:2px;word-break:break-word}' +
+    '.mb3r-btns{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}' +
+    '.mb3r-warn{background:#451a1a;border:1px solid #dc2626;color:#fecaca;border-radius:10px;padding:10px;font-size:13px;margin:8px 0}' +
+    '.mb3r-ok{background:#052e1b;border:1px solid #059669;color:#bbf7d0;border-radius:10px;padding:10px;font-size:13px;margin:8px 0}' +
+    '.mb3r-info{background:#1e1b4b;border:1px solid #4f46e5;color:#c7d2fe;border-radius:10px;padding:10px;font-size:13px;margin:8px 0}' +
+    '#mb3r-toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%);z-index:100001;background:#1e2842;color:#fff;border:1px solid #4f46e5;padding:10px 14px;border-radius:10px;font-size:13px;max-width:90%}' +
+    '#mb3RecBanner{margin-top:14px;background:#451a1a;border:1px solid #dc2626;color:#fecaca;border-radius:10px;padding:10px;font-size:13px;text-align:left}';
+
+  function ensureStyle() {
+    if (styleDone) return; styleDone = true;
+    const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s);
+  }
+  function toast(msg, ms) {
+    ensureStyle();
+    let t = document.getElementById('mb3r-toast');
+    if (!t) { t = document.createElement('div'); t.id = 'mb3r-toast'; document.body.appendChild(t); }
+    t.textContent = msg; t.style.display = 'block';
+    clearTimeout(t._t); t._t = setTimeout(() => { t.style.display = 'none'; }, ms || 4000);
+  }
+  function show(html) {
+    ensureStyle(); close();
+    host = document.createElement('div'); host.className = 'mb3r-ov';
+    host.innerHTML = '<div class="mb3r-box">' + html + '</div>';
+    host.addEventListener('click', e => {
+      const b = e.target.closest ? e.target.closest('[data-act]') : null;
+      if (!b) { if (e.target === host) close(); return; }
+      onAct(b.getAttribute('data-act'), b.getAttribute('data-id')).catch(err => toast('Error: ' + (err && err.message || err), 7000));
+    });
+    document.body.appendChild(host);
+  }
+  function close() { if (host) { host.remove(); host = null; } }
+
+  async function openPanel() {
+    const email = gEmail();
+    if (!email) {
+      return show('<div class="mb3r-h"><span>\uD83D\uDEDF Data Recovery</span><button class="mb3r-x" data-act="close">\u2715</button></div>' +
+        '<p class="mb3r-p">Please log in with your Gmail first. Backups are kept separately for each account.</p>' +
+        '<div class="mb3r-tools"><button class="mb3r-b" data-act="close">OK</button></div>');
+    }
+    let list = [], err = '';
+    try { list = (await Store.all()).filter(r => r.email === email); } catch (e) { err = e.message || String(e); }
+    lastList = list;
+    let h = '<div class="mb3r-h"><span>\uD83D\uDEDF Data Recovery</span><button class="mb3r-x" data-act="close">\u2715</button></div>' +
+      '<p class="mb3r-p">Account: <b>' + esc(email) + '</b>. Backups are saved automatically on this device; use Drive or a file to keep a copy outside the browser.</p>';
+    if (err) h += '<div class="mb3r-warn">Backup storage problem: ' + esc(err) + '</div>';
+    try {
+      const hc = await healthCheck(email, list);
+      if (hc.status !== 'ok') h += '<div class="mb3r-warn"><b>\u26A0 ' + esc(healthMessage(hc)) + '</b></div>';
+    } catch (e) {}
+    h += '<div class="mb3r-tools">' +
+      '<button class="mb3r-b" data-act="now">+ Backup now</button>' +
+      '<button class="mb3r-b s" data-act="exp">\u2B07 Export file</button>' +
+      '<button class="mb3r-b s" data-act="imp">\u2B06 Import file</button></div>' +
+      '<input type="file" id="mb3r-file" accept=".json,application/json" style="display:none">';
+    h += '<div class="mb3r-sec">Backups on this device (' + list.length + ')</div>';
+    if (!list.length) h += '<p class="mb3r-p">No backups yet. One is created automatically while you play.</p>';
+    const best = list.slice().sort((a, b) => score(b.sum) - score(a.sum))[0];
+    list.forEach(r => {
+      h += '<div class="mb3r-item"><div><b>' + esc(fmtDT(r.ts)) + (best && best.id === r.id ? ' \u2B50' : '') + '</b>' +
+        '<small>' + esc(r.label) + ' \u00b7 ' + fmtSize(r.size) + '</small><small>' + esc(sumLine(r.sum)) + '</small></div>' +
+        '<div class="mb3r-btns"><button class="mb3r-b g" data-act="res" data-id="' + esc(r.id) + '">Restore</button>' +
+        '<button class="mb3r-b s" data-act="one" data-id="' + esc(r.id) + '">\u2B07</button>' +
+        '<button class="mb3r-b s" data-act="del" data-id="' + esc(r.id) + '">\uD83D\uDDD1</button></div></div>';
+    });
+    if (list.length) h += '<p class="mb3r-p">\u2B50 = most advanced backup.</p>';
+    h += '<div class="mb3r-sec">\u2601\uFE0F Google Drive</div>';
+    if (gToken()) {
+      h += '<div class="mb3r-tools"><button class="mb3r-b s" data-act="dup">Backup to Drive</button>' +
+        '<button class="mb3r-b s" data-act="ddn">Get backups from Drive</button>' +
+        '<button class="mb3r-b s" data-act="rvl">Show Drive version history</button></div>';
+      if (revs.length) {
+        h += '<p class="mb3r-p">Previous versions of your cloud save (' + revs.length + '). Nothing is changed until you restore.</p>';
+        revs.slice(0, 40).forEach(rv => {
+          const c = revCache[rv.id];
+          h += '<div class="mb3r-item"><div><b>' + esc(fmtDT(rv.modifiedTime)) + '</b><small>' + (rv.size ? fmtSize(Number(rv.size)) : '') + '</small>' +
+            (c ? '<small>' + esc(c.err ? 'Could not read: ' + c.err : sumLine(c.sum)) + '</small>' : '') + '</div>' +
+            '<div class="mb3r-btns"><button class="mb3r-b s" data-act="rvp" data-id="' + esc(rv.id) + '">Preview</button>' +
+            '<button class="mb3r-b s" data-act="rvs" data-id="' + esc(rv.id) + '">Save copy</button>' +
+            '<button class="mb3r-b g" data-act="rvr" data-id="' + esc(rv.id) + '">Restore</button></div></div>';
+        });
+      }
+    } else {
+      h += '<p class="mb3r-p">Drive is not connected. Connect it to keep backups on your Google account (survives cleared browser data and a new device) and to browse earlier versions of your cloud save.</p>' +
+        '<div class="mb3r-tools"><button class="mb3r-b s" data-act="drc">Connect Google Drive</button></div>';
+    }
+    show(h);
+    const f = document.getElementById('mb3r-file');
+    if (f) f.onchange = async () => {
+      if (!f.files[0]) return;
+      try {
+        const recs = await readFile(f.files[0]);
+        const r = await mergeIn(recs, email, true);
+        toast(r.added ? 'Imported ' + r.added + ' backup(s).' + (r.skipped ? ' Skipped ' + r.skipped + ' invalid.' : '') : (r.skipped ? 'No valid backups in that file.' : 'Those backups were already here.'), 6000);
+        openPanel();
+      } catch (e) { toast('Import failed: ' + e.message, 7000); }
+    };
+  }
+
+  function confirmRestore(rec, extra) {
+    const email = gEmail();
+    const cur = (() => { const l = localSummary(email); return l ? sumLine(l) : 'No saved game on this device'; })();
+    let h = '<div class="mb3r-h"><span>Restore this backup?</span></div>' +
+      '<div class="mb3r-item"><div><b>' + esc(fmtDT(rec.ts)) + '</b><small>' + esc(rec.label) + ' \u00b7 ' + fmtSize(rec.size) + '</small><small>' + esc(sumLine(rec.sum)) + '</small></div></div>';
+    if (rec.email && rec.email !== email) h += '<div class="mb3r-warn">This backup belongs to <b>' + esc(rec.email) + '</b>, but you are logged in as <b>' + esc(email) + '</b>.</div>';
+    h += '<div class="mb3r-warn">Your <b>current</b> progress will be replaced:<br>' + esc(cur) + '<br><br>A safety copy of your current data is saved first, so you can undo this from the list.' +
+      (gToken() ? ' Your Google Drive save will be updated too.' : ' Google Drive is not connected, so your cloud save will not be changed.') + '</div>' +
+      '<div class="mb3r-tools"><button class="mb3r-b d" data-act="go" data-id="' + esc(rec.id) + '">Yes, restore</button><button class="mb3r-b s" data-act="back">Cancel</button></div>';
+    pending = rec;
+    show(h);
+  }
+  let pending = null;
+
+  async function runRestore(rec) {
+    show('<div class="mb3r-h"><span>Restoring\u2026</span></div><p class="mb3r-p">Please wait. Do not close the page.</p>');
+    try {
+      const r = await restoreRecord(rec);
+      let h = '<div class="mb3r-h"><span>\u2705 Recovery successful</span></div>' +
+        '<div class="mb3r-ok">Restored backup from ' + esc(fmtDT(rec.ts)) + ':<br><b>' + esc(sumLine(r.sum)) + '</b></div>';
+      if (!r.verified) h += '<div class="mb3r-warn">The save was written, but the game state could not be fully cross-checked after loading. Please check your studio; the backup is still in the list.</div>';
+      if (r.drive === 'updated') h += '<p class="mb3r-p">\u2601\uFE0F Google Drive save updated as well.</p>';
+      else if (r.drive === 'failed') h += '<div class="mb3r-warn">Restored on this device, but updating Google Drive failed. The game will retry on its next save while Drive stays connected. Do not press CONTINUE on another device until Drive shows saved.</div>';
+      else h += '<div class="mb3r-info">Google Drive is not connected, so your cloud save was not changed. After connecting Drive, play or save from inside the game so the restored progress is uploaded (do not press CONTINUE first, it prefers the cloud copy).</div>';
+      h += '<div class="mb3r-tools"><button class="mb3r-b g" data-act="close">Continue playing</button></div>';
+      show(h);
+    } catch (e) {
+      show('<div class="mb3r-h"><span>\u274C Recovery failed</span></div><div class="mb3r-warn">' + esc(e.message || e) + '</div>' +
+        '<div class="mb3r-tools"><button class="mb3r-b s" data-act="back">Back</button></div>');
+    }
+  }
+
+  async function onAct(a, id) {
+    const rec = lastList.find(r => r.id === id);
+    const email = gEmail();
+    switch (a) {
+      case 'close': return close();
+      case 'later': dismissed = true; return close();
+      case 'back': return openPanel();
+      case 'now': {
+        let st = null;
+        if (gameActive() && isValidState(gState())) st = gState();
+        else { const p = safeParse(safeGet(keyFor(email)) || 'null'); if (isValidState(p)) st = p; }
+        if (!st) { toast('There is no saved game to back up yet.'); return; }
+        const r = await queueBackup(st, 'Manual backup', email, { manual: true });
+        toast(r ? 'Backup saved.' : 'Backup failed.'); return openPanel();
+      }
+      case 'exp': return download('movie-business-3-backups-' + new Date().toISOString().slice(0, 10) + '.json', pack(lastList, email));
+      case 'one': if (rec) download('movie-business-3-backup-' + rec.ts + '.json', pack([rec], email)); return;
+      case 'imp': { const f = document.getElementById('mb3r-file'); if (f) f.click(); return; }
+      case 'del':
+        if (rec && window.confirm('Delete this backup permanently?\n' + fmtDT(rec.ts) + '\n' + sumLine(rec.sum))) { await Store.del([rec.id]); return openPanel(); }
+        return;
+      case 'res': if (rec) return confirmRestore(rec); return;
+      case 'go': if (pending && pending.id === id) { const r = pending; pending = null; return runRestore(r); } return;
+      case 'drc': try { toast('Connecting to Google Drive\u2026'); await requestGoogleDriveAccess(); } catch (e) { toast('Drive connect failed: ' + e.message, 7000); } return openPanel();
+      case 'dup': toast('Saving backups to Drive\u2026'); try { const n = await syncToDrive(); toast('\u2705 ' + n + ' backups are on Google Drive.', 5000); } catch (e) { toast('\u274C Drive backup failed: ' + e.message, 8000); } return;
+      case 'ddn': toast('Reading backups from Drive\u2026'); try { const r = await pullFromDrive(); toast('\u2705 Added ' + r.added + ' backup(s) from Drive.', 5000); } catch (e) { toast('\u274C ' + e.message, 8000); } return openPanel();
+      case 'rvl': toast('Loading Drive history\u2026'); try { const n = await listRevisions(); toast(n + ' version(s) found.'); } catch (e) { toast('\u274C ' + e.message, 8000); } return openPanel();
+      case 'rvp': try { const st = await fetchRevisionState(id); revCache[id] = { sum: summarize(st) }; } catch (e) { revCache[id] = { err: e.message || String(e) }; } return openPanel();
+      case 'rvs': case 'rvr': {
+        const st = await fetchRevisionState(id);
+        const rv = revs.find(x => x.id === id);
+        const r = buildRecord(st, 'Drive version ' + (rv ? fmtDT(rv.modifiedTime) : id), email, { manual: true });
+        if (rv && Number.isFinite(Date.parse(rv.modifiedTime))) r.ts = Date.parse(rv.modifiedTime);
+        const saved = await enqueue(() => storeRecord(r));
+        lastList = (await Store.all()).filter(x => x.email === email);
+        if (a === 'rvs') { toast('Saved a copy of that Drive version to your backups.'); return openPanel(); }
+        return confirmRestore(saved);
+      }
+    }
+  }
+
+  /* ---------- banner + prompt ---------- */
+  function showBanner(h) {
+    ensureStyle();
+    const old = document.getElementById('mb3RecBanner'); if (old) old.remove();
+    const anchor = document.getElementById('driveStatus');
+    if (!anchor || !anchor.parentNode || h.status === 'ok') return;
+    const d = document.createElement('div'); d.id = 'mb3RecBanner';
+    d.innerHTML = '<b>\u26A0 ' + esc(healthMessage(h)) + '</b><br><button class="mb3r-b g" style="margin-top:8px" onclick="MB3Recovery.open()">\uD83D\uDEDF OPEN DATA RECOVERY</button>';
+    anchor.parentNode.appendChild(d);
+  }
+  async function afterLogin() {
+    const email = gEmail();
+    const old = document.getElementById('mb3RecBanner'); if (old) old.remove();
+    if (!email) return;
+    showBanner(await healthCheck(email));
+  }
+  async function promptIfNeeded(fromContinue) {
+    const email = gEmail(); if (!email || dismissed) return;
+    const h = await healthCheck(email);
+    if (h.status === 'ok') return;
+    if (!fromContinue && h.status === 'missing') return;
+    show('<div class="mb3r-h"><span>\u26A0 Recovery available</span></div><div class="mb3r-warn">' + esc(healthMessage(h)) + '</div>' +
+      '<p class="mb3r-p">Nothing is changed unless you confirm a restore.</p>' +
+      '<div class="mb3r-tools"><button class="mb3r-b g" data-act="back">Open Data Recovery</button><button class="mb3r-b s" data-act="later">Not now</button></div>');
+  }
+
+  /* ---------- init ---------- */
+  function init() {
+    hookSave(); hookEnter(); hookLogin();
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  }
+
+  window.MB3Recovery = { open: openPanel };
+  if (TEST) {
+    window.MB3Recovery._t = { init, queueBackup, Store, healthCheck, restoreRecord, normalize, mergeIn, pack, buildRecord, summarize, score, isValidState, prune, selectForDrive, localSummary };
+  } else {
+    init();
+  }
+})();
+
 </script>
 
 </body>
